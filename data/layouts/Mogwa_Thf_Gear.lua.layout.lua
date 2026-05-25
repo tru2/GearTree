@@ -1,0 +1,45 @@
+return {
+    ["folders"] = {
+        {
+            ["id"] = "f2",
+            ["name"] = "Utility",
+            ["parent"] = "root",
+        },
+        {
+            ["id"] = "f3",
+            ["name"] = "Idle",
+            ["parent"] = "root",
+        },
+    },
+    ["moves"] = {
+        ["sets.DayIdle"] = "f3",
+        ["sets.ExtraRegen"] = "f2",
+        ["sets.Kiting"] = "f2",
+        ["sets.NightIdle"] = "f3",
+        ["sets.TreasureHunter"] = "f2",
+        ["sets.idle"] = "f3",
+        ["sets.resting"] = "f2",
+    },
+    ["next_id"] = 4,
+    ["orders"] = {
+        ["root"] = {
+            "path:sets.buff",
+            "path:sets.Knockback",
+            "path:sets.Suppa",
+            "path:sets.DWEarrings",
+            "path:sets.DWMax",
+            "path:sets.Ambush",
+            "path:sets.weapons",
+            "path:sets.precast",
+            "path:sets.Self_Waltz",
+            "path:sets.AccMaxTP",
+            "path:sets.MaxTP",
+            "path:sets.midcast",
+            "path:sets.defense",
+            "path:sets.engaged",
+            "folder:f2",
+            "folder:f3",
+        },
+    },
+    ["version"] = 1,
+}

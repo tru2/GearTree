@@ -1,0 +1,13 @@
+<?xml version="1.0" ?>
+<addon>
+    <name>GearTree</name>
+    <description>Clickable tree and editor for Gearswap sets.</description>
+    <author>Tru + Codex</author>
+    <version>0.2.7</version>
+    <commands>
+        <command>
+            <name>geartree, gt</name>
+            <description>Control the GearTree window</description>
+        </command>
+    </commands>
+</addon>

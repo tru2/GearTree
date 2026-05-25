@@ -1,0 +1,32 @@
+<?xml version="1.1" ?>
+<settings>
+    <global>
+        <auto_load>true</auto_load>
+        <edit_mode>true</edit_mode>
+        <gear_file_override />
+        <last_set_path />
+        <last_undo_backup>C:\Program Files (x86)\Windower\addons\GearTree\data\backups\Mogwa_Thf_Gear.lua.20260524_160855.bak</last_undo_backup>
+        <last_undo_file>C:\Program Files (x86)\Windower\addons\GearSwap\data\Mogwa\Mogwa_Thf_Gear.lua</last_undo_file>
+        <last_undo_set_path>sets.precast.JA[&quot;Violent Flourish&quot;]</last_undo_set_path>
+        <pos_x>100</pos_x>
+        <pos_y>100</pos_y>
+        <tree_mode>raw</tree_mode>
+        <visible_rows>22</visible_rows>
+        <width>260</width>
+    </global>
+    <mogly>
+        <last_set_path>sets.precast.FC</last_set_path>
+        <last_undo_backup />
+        <last_undo_file />
+        <last_undo_set_path />
+        <pos_x>600</pos_x>
+        <tree_mode>organized</tree_mode>
+    </mogly>
+    <mogwa>
+        <last_undo_backup>C:/Program Files (x86)/Windower/addons/GearTree/data/backups/Mogwa_Thf_Gear.lua.20260524_162208.bak</last_undo_backup>
+        <last_undo_file>C:/Program Files (x86)/Windower/addons/GearSwap/data/Mogwa/Mogwa_Thf_Gear.lua</last_undo_file>
+        <pos_x>505.66662597656</pos_x>
+        <pos_y>48.333335876465</pos_y>
+        <tree_mode>organized</tree_mode>
+    </mogwa>
+</settings>
