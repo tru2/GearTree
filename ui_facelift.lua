@@ -9,6 +9,20 @@ local gear_slots = require('gear_slots')
 
 local ui = {}
 
+local function windower_asset(relative)
+    local base = windower and windower.windower_path or ''
+    if base ~= '' then
+        if base:sub(-1) ~= '/' and base:sub(-1) ~= '\\' then
+            base = base .. '/'
+        end
+        return base .. relative
+    end
+    return 'C:/Program Files (x86)/Windower/' .. relative
+end
+
+local RECT_TEXTURE = windower_asset('addons/invtracker/slot.png')
+local TEXT_CHAR_WIDTH = 8
+
 local cfg = {
     pos_x = 100,
     pos_y = 100,
@@ -23,7 +37,7 @@ local cfg = {
     footer_height = 18,
     show_list_pane = false,
     list_width = 300,
-    preview_width = 390,
+    preview_width = 445,
     show_icons = false,
     icon_size = 10,
 
@@ -33,6 +47,12 @@ local cfg = {
     title_fg = { 225, 210, 170 },
     active_title_bg = { 245, 46, 74, 110 },
     active_title_fg = { 255, 232, 150 },
+    frame_bg = { 196, 3, 8, 13 },
+    border_light = { 190, 156, 158, 154 },
+    border_shadow = { 190, 156, 158, 154 },
+    divider_col = { 185, 170, 170, 164 },
+    scrollbar_track = { 105, 52, 58, 64 },
+    scrollbar_thumb = { 150, 128, 128, 126 },
     row_fg_set = { 220, 220, 215 },
     row_fg_cat = { 155, 198, 230 },
     row_fg_dim = { 132, 138, 145 },
@@ -84,6 +104,7 @@ local state = {
     last_saved_path = '',
     objects = {},
     image_objects = {},
+    decor_images = {},
     tree_rows = {},
     tree_icons = {},
     list_rows = {},
@@ -91,6 +112,8 @@ local state = {
     preview_rows = {},
     preview_aug_tags = {},
     preview_tab_bg = nil,
+    preview_tab_rects = {},
+    preview_tab_separators = {},
     preview_gear_title = nil,
     preview_changes_title = nil,
     preview_data_title = nil,
@@ -132,7 +155,7 @@ local function dims()
 end
 
 local function cols(width)
-    return math.max(12, math.floor(width / 7))
+    return math.max(12, math.floor(width / TEXT_CHAR_WIDTH))
 end
 
 local function clamp(value, min_value, max_value)
@@ -151,6 +174,11 @@ local function add_image(obj)
     return obj
 end
 
+local function add_decor_image(obj)
+    state.decor_images[#state.decor_images + 1] = obj
+    return obj
+end
+
 local function image_obj()
     local obj = images.new({
         draggable = false,
@@ -160,6 +188,36 @@ local function image_obj()
         texture = { fit = true, path = '' },
     })
     return add_image(obj)
+end
+
+local function rect_obj(color)
+    local obj = images.new({
+        draggable = false,
+        visible = false,
+        color = {
+            alpha = color and color[1] or 255,
+            red = color and color[2] or 255,
+            green = color and color[3] or 255,
+            blue = color and color[4] or 255,
+        },
+        size = { width = 1, height = 1 },
+        texture = { fit = false, path = RECT_TEXTURE },
+    })
+    if obj.path then obj:path(RECT_TEXTURE) end
+    if obj.fit then obj:fit(false) end
+    return add_decor_image(obj)
+end
+
+local function set_rect(obj, x, y, width, height, color)
+    if not obj then return end
+    obj:pos(math.floor(x), math.floor(y))
+    obj:size(math.max(1, math.floor(width)), math.max(1, math.floor(height)))
+    if obj.path then obj:path(RECT_TEXTURE) end
+    if color then
+        if obj.color then obj:color(color[2], color[3], color[4]) end
+        if obj.alpha then obj:alpha(color[1]) end
+    end
+    obj:visible(state.visible)
 end
 
 local function text_obj()
@@ -701,12 +759,41 @@ local function best_location(name)
     return nil, false
 end
 
+local function where_badge_from_label(label)
+    local text = tostring(label or ''):lower()
+
+    if text == 'inventory' then
+        return 'INV'
+    elseif text:find('safe 2', 1, true) then
+        return 'SAFE2'
+    elseif text:find('safe', 1, true) then
+        return 'SAFE1'
+    elseif text == 'storage' then
+        return 'STOR'
+    elseif text:find('locker', 1, true) then
+        return 'LOCK'
+    elseif text:find('satchel', 1, true) then
+        return 'SATCH'
+    elseif text:find('sack', 1, true) then
+        return 'SACK'
+    elseif text:find('case', 1, true) then
+        return 'CASE'
+    else
+        local ward = text:match('wardrobe%s*(%d+)')
+        if ward then
+            return 'WRD' .. ward
+        end
+    end
+
+    return 'UNKN'
+end
+
 local function gear_line_status(item, set_path)
     if not item or state.current_equipment.path ~= set_path then
-        return 'Unknown', 'Unknown', cfg.row_fg_dim
+        return 'UNKN', cfg.row_fg_gold
     end
     if not comparable_gear_value(item.value) then
-        return 'Unknown', 'Unknown', cfg.row_fg_dim
+        return 'UNKN', cfg.row_fg_gold
     end
 
     local equipped = equipped_item_for_slot(item.slot)
@@ -714,43 +801,43 @@ local function gear_line_status(item, set_path)
     local expected_name, _, _, unresolved = gear_display(item.value)
 
     if unresolved then
-        return 'Unknown', 'Unknown ref', cfg.row_fg_red
+        return 'UNKN', cfg.row_fg_gold
     end
 
     if expected == 'empty' then
         if equipped and equipped.empty then
-            return 'Equipped', 'Empty', cfg.row_fg_green
+            return 'EQUIP', cfg.row_fg_green
         end
-        return 'Missing', 'Should be empty', cfg.row_fg_red
+        return 'MISS', cfg.row_fg_red
     end
 
     if equipped and not equipped.empty and same_name(equipped.name, expected_name) then
-        return 'Equipped', bag_label(equipped.bag), cfg.row_fg_green
+        return 'EQUIP', cfg.row_fg_green
     end
 
     local location, unavailable = best_location(expected_name)
-    if location and unavailable then
-        return 'Unavailable', location.label, cfg.row_fg_red
+    if location then
+        local badge = where_badge_from_label(location.label or bag_label(location.bag))
+        if unavailable then
+            return badge, cfg.row_fg_dim
+        end
+        return badge, cfg.row_fg_green
     end
 
-    return 'Missing', location and location.label or 'Not found', cfg.row_fg_red
+    return 'MISS', cfg.row_fg_red
 end
 
 local function gear_table_layout(width)
     local total = cols(width) - 1
-    local slot_w = 7
-    local aug_w = 4
-    local status_w = 11
-    local location_w = 12
-    local item_w = math.max(12, total - slot_w - aug_w - status_w - location_w - 4)
+    local slot_w = 6
+    local where_w = 6
+    local item_w = math.max(12, total - slot_w - where_w - 2)
     return {
         total = total,
         slot = slot_w,
         item = item_w,
-        aug = aug_w,
-        status = status_w,
-        location = location_w,
-        aug_col = slot_w + 1 + item_w + 1,
+        where = where_w,
+        where_col = slot_w + 1 + item_w + 1,
     }
 end
 
@@ -762,10 +849,8 @@ local function add_gear_header(out, width)
     local l = gear_table_layout(width)
     add_line(out,
         gear_table_cell('Slot', l.slot) .. ' ' ..
-        gear_table_cell('Item', l.item) .. ' ' ..
-        gear_table_cell('Mod', l.aug) .. ' ' ..
-        gear_table_cell('Status', l.status) .. ' ' ..
-        truncate('Location', l.location),
+        gear_table_cell('Item Name', l.item) .. ' ' ..
+        gear_table_cell('Where', l.where),
         cfg.row_fg_gold)
 end
 
@@ -790,37 +875,26 @@ local function changed_slot_lookup(path)
 end
 
 local function add_gear_line(out, item, width, show_augments, color, set_path, changed_slots)
-    local name, augments, augmented = gear_display(item and item.value or '')
+    local name = gear_display(item and item.value or '')
     local l = gear_table_layout(width)
-    local status, location, status_color = gear_line_status(item, set_path)
+    local badge, badge_color = gear_line_status(item, set_path)
     local canonical_slot = gear_slots.canonical(item and item.slot) or (item and item.slot)
     local just_changed = changed_slots and canonical_slot and changed_slots[canonical_slot]
-    color = color or status_color or cfg.row_fg_set
 
     add_line(out,
         gear_table_cell(slot_label(item and item.slot), l.slot) .. ' ' ..
         gear_table_cell(name, l.item) .. ' ' ..
-        gear_table_cell('', l.aug) .. ' ' ..
-        gear_table_cell(status, l.status) .. ' ' ..
-        truncate(location, l.location),
-        color)
+        gear_table_cell('', l.where),
+        cfg.row_fg_set)
 
     if just_changed then
         out[#out].bg = cfg.row_bg_changed
     end
 
-    if augmented then
-        out[#out].aug_tag = 'Aug'
-        out[#out].aug_tag_col = l.aug_col
-        out[#out].aug_tag_color = cfg.row_fg_blue
-    elseif just_changed then
-        out[#out].aug_tag = 'Chg'
-        out[#out].aug_tag_col = l.aug_col
-        out[#out].aug_tag_color = cfg.row_fg_violet
-    end
-
-    if show_augments and augments and augments ~= '' then
-        wrap_into(out, '         Aug: ' .. augments, cfg.row_fg_dim, width)
+    if badge and badge ~= '' then
+        out[#out].aug_tag = truncate(badge, l.where)
+        out[#out].aug_tag_col = l.where_col
+        out[#out].aug_tag_color = badge_color or cfg.row_fg_gold
     end
 end
 
@@ -835,11 +909,21 @@ local function preview_tab_index()
     return 1
 end
 
+local function active_preview_lines()
+    if state.preview_cards.summary_only and state.preview_card == nil then
+        return state.preview_cards.summary or {}
+    end
+    if state.preview_card == nil then
+        return {}
+    end
+    return state.preview_cards[state.preview_card] or {}
+end
+
 local function cycle_preview_tab(delta)
     if not is_equippable_leaf(selected_node()) then
-        state.preview_card = 'summary'
+        state.preview_card = nil
         state.preview_scroll = 0
-        state.preview_lines = state.preview_cards.summary or {}
+        state.preview_lines = active_preview_lines()
         if state.visible then ui.refresh() end
         return
     end
@@ -857,7 +941,7 @@ local function cycle_preview_tab(delta)
     state.source_cursor = 0
     state.source_pan = 0
     clear_source_left_guard()
-    state.preview_lines = state.preview_cards[state.preview_card] or {}
+    state.preview_lines = active_preview_lines()
     if state.visible then ui.refresh() end
 end
 
@@ -1055,6 +1139,24 @@ local function update_positions()
     local icon_y_offset = 3
     local text_x_offset = cfg.show_icons and 24 or 6
 
+    local frame_pad = 2
+    local border_w = 2
+    local frame_x = d.x - frame_pad
+    local frame_y = d.body_y - frame_pad
+    local frame_w = d.total_w + (frame_pad * 2)
+    local frame_h = d.body_h + (frame_pad * 2)
+    local left_pane_w = d.preview_x - d.x
+
+    set_rect(state.frame_bg_rect, frame_x, frame_y, frame_w, frame_h, cfg.frame_bg)
+    set_rect(state.content_bg_rect, d.x, d.body_y, d.total_w, d.body_h, cfg.panel_bg)
+    set_rect(state.border_top, frame_x, frame_y, frame_w, border_w, cfg.border_light)
+    set_rect(state.border_bottom, frame_x, frame_y + frame_h - border_w, frame_w, border_w, cfg.border_shadow)
+    set_rect(state.border_left, frame_x, frame_y, border_w, frame_h, cfg.border_light)
+    set_rect(state.border_right, frame_x + frame_w - border_w, frame_y, border_w, frame_h, cfg.border_shadow)
+    set_rect(state.header_rule, d.x, d.body_y + cfg.row_height, d.total_w, 1, cfg.divider_col)
+    set_rect(state.tree_title_bg_rect, d.tree_x, d.body_y, left_pane_w, cfg.row_height, cfg.active_title_bg)
+    set_rect(state.tree_divider_rect, d.preview_x - 1, d.body_y, 1, d.body_h, cfg.divider_col)
+
     state.header_bg:pos(d.x, d.y)
     fill_panel(state.header_bg, d.total_w, 1)
     state.header_bg:visible(false)
@@ -1063,12 +1165,15 @@ local function update_positions()
 
     state.tree_bg:pos(d.x, d.body_y)
     fill_panel(state.tree_bg, d.total_w, cfg.visible_rows + 1)
+    state.tree_bg:visible(false)
     state.list_bg:visible(false)
     state.preview_bg:visible(false)
 
-    state.tree_title:pos(d.tree_x, d.body_y)
+    state.tree_title:pos(d.tree_x + 6, d.body_y)
+    state.tree_title:bg_visible(false)
     state.list_title:pos(d.list_x, d.body_y)
-    set_title_active(state.tree_title, true)
+    state.list_title:bg_visible(false)
+    set_color(state.tree_title, cfg.active_title_fg)
 
     local tabs = {
         { card = 'gear', label = 'Gear', obj = state.preview_title },
@@ -1077,36 +1182,34 @@ local function update_positions()
         { card = 'evidence', label = 'Data', obj = state.preview_data_title },
     }
     local tab_count = #tabs
-    local tab_bar_cols = cols(d.preview_w)
-    local tab_cols = math.floor(tab_bar_cols / tab_count)
-    local used_cols = 0
+    local tab_w = math.floor(d.preview_w / tab_count)
+    local text_char_w = TEXT_CHAR_WIDTH
 
-    -- Draw one full-width inactive tab strip first. Individual tab labels are
-    -- then placed on top. This avoids making four independent padded text
-    -- backgrounds overlap each other.
     if state.preview_tab_bg then
-        state.preview_tab_bg:pos(d.preview_x, d.body_y)
-        state.preview_tab_bg:bg_visible(true)
-        state.preview_tab_bg:bg_color(cfg.title_bg[2], cfg.title_bg[3], cfg.title_bg[4])
-        state.preview_tab_bg:bg_alpha(cfg.title_bg[1])
-        state.preview_tab_bg:text(string.rep(' ', tab_bar_cols))
+        state.preview_tab_bg:visible(false)
     end
 
     for index, tab in ipairs(tabs) do
-        local width_cols = tab_cols
+        local width = tab_w
         if index == tab_count then
-            width_cols = tab_bar_cols - used_cols
+            width = d.preview_w - ((index - 1) * tab_w)
         end
 
-        local x = d.preview_x + (used_cols * 7)
+        local x = d.preview_x + ((index - 1) * tab_w)
         local active = state.preview_card == tab.card
+        local bg = active and cfg.active_title_bg or cfg.title_bg
+        local fg = active and cfg.active_title_fg or cfg.title_fg
 
-        tab.obj:pos(x, d.body_y)
-        tab.obj:bg_visible(active)
-        set_title_active(tab.obj, active)
-        tab.obj:text(center_pad(tab.label, width_cols))
+        set_rect(state.preview_tab_rects[index], x, d.body_y, width, cfg.row_height, bg)
+        if index > 1 then
+            set_rect(state.preview_tab_separators[index - 1], x, d.body_y, 1, cfg.row_height, cfg.divider_col)
+        end
 
-        used_cols = used_cols + width_cols
+        tab.obj:pos(x + math.max(4, math.floor((width - (#tab.label * text_char_w)) / 2)), d.body_y)
+        tab.obj:bg_visible(false)
+        set_color(tab.obj, fg)
+        tab.obj:text(tab.label)
+
     end
 
     local row_y = d.body_y + cfg.row_height
@@ -1152,6 +1255,26 @@ function ui.create(root, save_pos_callback)
     state.cursor = #state.flat > 0 and 1 or 0
 
     local d = dims()
+    state.frame_bg_rect = rect_obj(cfg.frame_bg)
+    state.content_bg_rect = rect_obj(cfg.panel_bg)
+    state.border_top = rect_obj(cfg.border_light)
+    state.border_bottom = rect_obj(cfg.border_shadow)
+    state.border_left = rect_obj(cfg.border_light)
+    state.border_right = rect_obj(cfg.border_shadow)
+    state.header_rule = rect_obj(cfg.divider_col)
+    state.tree_title_bg_rect = rect_obj(cfg.active_title_bg)
+    state.tree_divider_rect = rect_obj(cfg.divider_col)
+    state.tree_scroll_track = rect_obj(cfg.scrollbar_track)
+    state.tree_scroll_thumb = rect_obj(cfg.scrollbar_thumb)
+    state.preview_tab_rects = {}
+    state.preview_tab_separators = {}
+    for i = 1, 4 do
+        state.preview_tab_rects[i] = rect_obj(cfg.title_bg)
+        if i > 1 then
+            state.preview_tab_separators[i - 1] = rect_obj(cfg.divider_col)
+        end
+    end
+
     state.header_bg = panel_obj(d.total_w, 1)
     state.header = text_obj()
     state.header:color(cfg.title_fg[1], cfg.title_fg[2], cfg.title_fg[3])
@@ -1186,10 +1309,14 @@ function ui.destroy()
     for _, obj in ipairs(state.objects) do
         obj:destroy()
     end
+    for _, obj in ipairs(state.decor_images) do
+        obj:destroy()
+    end
     for _, obj in ipairs(state.image_objects) do
         obj:destroy()
     end
     state.objects = {}
+    state.decor_images = {}
     state.image_objects = {}
     state.tree_rows = {}
     state.tree_icons = {}
@@ -1200,6 +1327,9 @@ function ui.destroy()
 end
 
 local function set_visible(visible)
+    for _, obj in ipairs(state.decor_images) do
+        obj:visible(visible)
+    end
     for _, obj in ipairs(state.objects) do
         obj:visible(visible)
     end
@@ -1217,6 +1347,28 @@ local function set_visible(visible)
     end
 end
 
+local function update_tree_scrollbar(d)
+    if not state.tree_scroll_track or not state.tree_scroll_thumb then return end
+
+    local total = #state.flat
+    if total <= cfg.visible_rows then
+        state.tree_scroll_track:visible(false)
+        state.tree_scroll_thumb:visible(false)
+        return
+    end
+
+    local track_w = 5
+    local track_x = d.preview_x - track_w - 4
+    local track_y = d.body_y + cfg.row_height + 2
+    local track_h = (cfg.visible_rows * cfg.row_height) - 4
+    local thumb_h = math.max(28, math.floor(track_h * (cfg.visible_rows / total)))
+    local max_scroll = math.max(1, total - cfg.visible_rows)
+    local thumb_y = track_y + math.floor((track_h - thumb_h) * (state.scroll / max_scroll))
+
+    set_rect(state.tree_scroll_track, track_x, track_y, track_w, track_h, cfg.scrollbar_track)
+    set_rect(state.tree_scroll_thumb, track_x, thumb_y, track_w, thumb_h, cfg.scrollbar_thumb)
+end
+
 local function render_tree()
     local d = dims()
     state.flat = tree.flatten(state.root)
@@ -1226,9 +1378,10 @@ local function render_tree()
         state.cursor = 0
     end
     ensure_cursor_visible()
+    update_tree_scrollbar(d)
 
     local label = string.format(' Gear Sets [%d/%d] ', state.cursor, #state.flat)
-    state.tree_title:text(pad(label, cols(d.tree_w)))
+    state.tree_title:text(truncate(label, cols(d.tree_w) - 1))
 
     for i = 1, cfg.visible_rows do
         local flat_idx = state.scroll + i
@@ -1352,7 +1505,7 @@ end
 
 local function render_preview()
     local d = dims()
-    state.preview_lines = state.preview_cards[state.preview_card] or {}
+    state.preview_lines = active_preview_lines()
 
     local max_scroll = math.max(0, #state.preview_lines - cfg.visible_rows)
     if state.preview_card == 'evidence' then
@@ -1404,7 +1557,7 @@ local function render_preview()
             obj:text(truncate(text, cols(d.preview_w) - 1))
             set_color(obj, color)
             if tag and meta.aug_tag and meta.aug_tag_col then
-                tag:pos(d.preview_x + 4 + (meta.aug_tag_col * 7), d.body_y + cfg.row_height + (i - 1) * cfg.row_height)
+                tag:pos(d.preview_x + 4 + (meta.aug_tag_col * TEXT_CHAR_WIDTH), d.body_y + cfg.row_height + (i - 1) * cfg.row_height)
                 tag:text(meta.aug_tag)
                 set_color(tag, meta.aug_tag_color or cfg.row_fg_blue)
                 tag:visible(state.visible)
@@ -1447,16 +1600,15 @@ function ui.is_visible()
 end
 
 function ui.show_preview(node)
-    if not is_equippable_leaf(node) then
-        state.preview_card = 'summary'
-    elseif state.preview_card == 'summary' then
-        state.preview_card = 'gear'
-    end
     state.preview_cards = build_preview_cards(node)
     if state.preview_cards.summary_only then
-        state.preview_card = 'summary'
+        state.preview_card = nil
+    elseif is_equippable_leaf(node) then
+        state.preview_card = 'gear'
+    else
+        state.preview_card = nil
     end
-    state.preview_lines = state.preview_cards[state.preview_card] or {}
+    state.preview_lines = active_preview_lines()
     state.preview_scroll = 0
     state.source_cursor = 0
     state.source_pan = 0
@@ -1475,7 +1627,7 @@ function ui.hide_preview()
 end
 
 local function scroll_preview(delta)
-    state.preview_lines = state.preview_cards[state.preview_card] or {}
+    state.preview_lines = active_preview_lines()
     local max_scroll = math.max(0, #state.preview_lines - cfg.visible_rows)
     state.preview_scroll = clamp(state.preview_scroll + delta, 0, max_scroll)
     if state.visible then render_preview() end
@@ -1519,7 +1671,7 @@ end
 function ui.toggle_preview_focus()
     state.focus = 'tree'
     if state.preview_cards.summary_only then
-        state.preview_card = 'summary'
+        state.preview_card = nil
     else
         state.preview_card = 'gear'
     end
@@ -1527,7 +1679,7 @@ function ui.toggle_preview_focus()
     state.source_cursor = 0
     state.source_pan = 0
     clear_source_left_guard()
-    state.preview_lines = state.preview_cards[state.preview_card] or {}
+    state.preview_lines = active_preview_lines()
     if state.visible then ui.refresh() end
 end
 
@@ -1937,12 +2089,14 @@ local function refresh_preview_cards_preserving_source()
 
     state.preview_cards = build_preview_cards(selected_node())
     if state.preview_cards.summary_only then
-        state.preview_card = 'summary'
+        state.preview_card = nil
         state.source_cursor = 0
         state.source_pan = 0
         clear_source_left_guard()
+    elseif state.preview_card == nil then
+        state.preview_card = 'gear'
     end
-    state.preview_lines = state.preview_cards[state.preview_card] or {}
+    state.preview_lines = active_preview_lines()
 
     if old_card == 'evidence' and state.preview_card == 'evidence' then
         state.source_cursor = old_cursor
