@@ -721,8 +721,19 @@ local function equipped_item_for_slot(slot)
     return state.current_equipment.slots and state.current_equipment.slots[canonical] or nil
 end
 
+local function normalize_item_name(name)
+    local text = tostring(name or '')
+    text = text:gsub("%c", " ")
+    text = text:gsub("’", "'"):gsub("‘", "'")
+    text = text:gsub("\194\160", " ")
+    text = text:lower()
+    text = text:gsub('%s+', ' ')
+    text = text:gsub('^%s+', ''):gsub('%s+$', '')
+    return text
+end
+
 local function same_name(left, right)
-    return tostring(left or ''):lower() == tostring(right or ''):lower()
+    return normalize_item_name(left) == normalize_item_name(right)
 end
 
 local function bag_label(id)
@@ -857,14 +868,6 @@ end
 local function changed_slot_lookup(path)
     local slots = {}
 
-    if path and state.live_changes.path == path then
-        for _, row in ipairs(state.live_changes.rows or {}) do
-            if row.slot then
-                slots[gear_slots.canonical(row.slot) or row.slot] = true
-            end
-        end
-    end
-
     if path and state.recent_saved.path == path then
         for slot in pairs(state.recent_saved.slots or {}) do
             slots[gear_slots.canonical(slot) or slot] = true
@@ -874,18 +877,27 @@ local function changed_slot_lookup(path)
     return slots
 end
 
+local function maybe_clear_recent_saved(node)
+    local current_path = node and path_string(node) or ''
+    if current_path == '' then return end
+    if state.recent_saved.path and state.recent_saved.path ~= current_path then
+        state.recent_saved = { path = nil, slots = {} }
+    end
+end
+
 local function add_gear_line(out, item, width, show_augments, color, set_path, changed_slots)
     local name = gear_display(item and item.value or '')
     local l = gear_table_layout(width)
     local badge, badge_color = gear_line_status(item, set_path)
     local canonical_slot = gear_slots.canonical(item and item.slot) or (item and item.slot)
     local just_changed = changed_slots and canonical_slot and changed_slots[canonical_slot]
+    local row_color = badge_color or cfg.row_fg_set
 
     add_line(out,
         gear_table_cell(slot_label(item and item.slot), l.slot) .. ' ' ..
         gear_table_cell(name, l.item) .. ' ' ..
         gear_table_cell('', l.where),
-        cfg.row_fg_set)
+        row_color)
 
     if just_changed then
         out[#out].bg = cfg.row_bg_changed
@@ -1600,6 +1612,7 @@ function ui.is_visible()
 end
 
 function ui.show_preview(node)
+    maybe_clear_recent_saved(node)
     state.preview_cards = build_preview_cards(node)
     if state.preview_cards.summary_only then
         state.preview_card = nil
@@ -2082,6 +2095,7 @@ function ui.set_last_saved(path)
 end
 
 local function refresh_preview_cards_preserving_source()
+    maybe_clear_recent_saved(selected_node())
     local old_card = state.preview_card
     local old_cursor = state.source_cursor
     local old_pan = state.source_pan

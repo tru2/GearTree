@@ -781,6 +781,13 @@ local function capture_baseline_for(node)
         if shot then
             baselines[path] = shot
             publish_current_equipment(path, shot)
+            coroutine.schedule(function()
+                if active_edit_path ~= path then return end
+                local later = snapshot.capture()
+                if later then
+                    publish_current_equipment(path, later)
+                end
+            end, 1.5)
             refresh_inventory_locations(true)
             if active_edit_path == path then
                 publish_changes(path, shot, {}, 0)
