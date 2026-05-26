@@ -637,6 +637,92 @@ local function raw_path_route_for_keys(keys)
     return nil
 end
 
+local function normalized_text(value)
+    local text = tostring(value or ''):lower()
+    text = text:gsub('&', 'and')
+    return text
+end
+
+local function contains_any(value, terms)
+    local text = normalized_text(value)
+    if text == '' then return false end
+    for _, term in ipairs(terms or {}) do
+        local needle = normalized_text(term)
+        if needle ~= '' and text:find(needle, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function is_healing_spell(spell)
+    return contains_any(spell, {
+        'Cure', 'Curaga', 'Cursna', 'Erase', 'Regen', 'Cure V', 'Cure VI',
+    })
+end
+
+local function is_enhancing_spell(spell)
+    return contains_any(spell, {
+        'Haste', 'Refresh', 'Phalanx', 'Protect', 'Shell', 'Stoneskin',
+        'Aquaveil', 'Bar', 'Barspell', 'Barspells',
+    })
+end
+
+local function is_enfeebling_spell(spell)
+    return contains_any(spell, {
+        'Slow', 'Paralyze', 'Blind', 'Silence', 'Sleep', 'Distract', 'Frazzle',
+    })
+end
+
+local function is_elemental_spell(spell)
+    return contains_any(spell, {
+        'Fire', 'Blizzard', 'Aero', 'Stone', 'Thunder', 'Water',
+        'Firaga', 'Blizzaga', 'Aeroga', 'Stonega', 'Thundaga', 'Waterga',
+        'Burst', 'Comet',
+    })
+end
+
+local function is_dark_spell(spell)
+    return contains_any(spell, {
+        'Drain', 'Aspir', 'Stun', 'Absorb',
+    })
+end
+
+local function is_song_spell(spell)
+    return contains_any(spell, {
+        'March', 'Madrigal', 'Minuet', 'Ballad', 'Carol', 'Etude',
+        'Prelude', 'Paeon', 'Scherzo', 'Lullaby', 'Requiem',
+    })
+end
+
+local function references_treasure_hunter(inheritance)
+    if type(inheritance) ~= 'table' then return false end
+
+    local function scan(value)
+        if value == nil then return false end
+        local text = tostring(value):lower()
+        if text == '' then return false end
+        text = text:gsub('&', 'and')
+        return text:find('treasurehunter', 1, true) ~= nil
+            or text:find('treasure hunter', 1, true) ~= nil
+            or text:find('sets.treasurehunter', 1, true) ~= nil
+            or text:find('setstreasurehunter', 1, true) ~= nil
+    end
+
+    if scan(inheritance) then return true end
+    for _, ref in ipairs(inheritance.references or {}) do
+        if scan(ref) then return true end
+    end
+    for _, base in ipairs(inheritance.bases or {}) do
+        if scan(base) then return true end
+    end
+    for _, slot in ipairs(inheritance.override_slots or {}) do
+        if scan(slot) then return true end
+    end
+    if scan(inheritance.kind) then return true end
+    return false
+end
+
 local function content_route_for_keys(keys, inheritance)
     local k2, k3 = keys[2], keys[3]
     if k2 == 'midcast' then
@@ -763,16 +849,6 @@ local function trigger_for(keys, category)
     if info and info.trigger then return info.trigger end
     if category == 'Unknown / Custom Set' then return 'Unknown' end
     return category or 'Unknown'
-end
-
-local function references_treasure_hunter(inheritance)
-    for _, ref in ipairs(inheritance.bases or {}) do
-        if tostring(ref):find('TreasureHunter', 1, true) then return true end
-    end
-    for _, ref in ipairs(inheritance.references or {}) do
-        if tostring(ref):find('TreasureHunter', 1, true) then return true end
-    end
-    return false
 end
 
 local function gear_values(node)

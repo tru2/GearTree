@@ -1327,7 +1327,7 @@ local function handle_saveslot_command(args)
     publish_current_equipment(path, current)
 
     local item = current[canonical]
-    if not item or item.empty then
+    if not item then
         gt_chat(CHAT.warn, 'No equipped item found in ' .. canonical .. '.')
         return
     end

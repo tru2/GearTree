@@ -771,6 +771,9 @@ end
 
 local function gear_display(value)
     local raw = tostring(value or '')
+    if raw == 'empty' then
+        return 'empty', nil, false, false, nil
+    end
     local reference = gear_reference_key(raw)
     if reference and state.gear_reference_items[reference] then
         local resolved = state.gear_reference_items[reference]
@@ -921,22 +924,12 @@ end
 
 local function resource_lookup_result_for_name(name)
     local raw = tostring(name or '')
+    if trim(raw) == 'empty' then
+        return nil
+    end
     local normalized = normalize_lookup_token(raw)
     if normalized == '' then
-        return {
-            normalized = '',
-            exact_id = nil,
-            exact_name = nil,
-            exact_field = nil,
-            exact_candidates = {},
-            abbreviation_candidates = {},
-            matched_id = nil,
-            matched_name = nil,
-            matched_field = nil,
-            matched_english = nil,
-            matched_english_log = nil,
-            unresolved = true,
-        }
+        return nil
     end
 
     reset_resource_lookup_cache_if_needed()
@@ -1257,6 +1250,13 @@ local function resolve_gear_spec(value)
         gear_reference = reference,
     }
 
+    if trim(value) == 'empty' then
+        spec.expected_empty = true
+        spec.display_name = 'empty'
+        spec.has_augments = false
+        return spec
+    end
+
     if reference and not state.gear_reference_items[reference] then
         spec.unresolved_ref = reference
         spec.unresolved = true
@@ -1312,6 +1312,9 @@ local function bag_access(id)
 end
 
 local function best_location_exact(spec)
+    if spec and spec.expected_empty then
+        return nil, false
+    end
     if spec and spec.unresolved_ref then
         return nil, false
     end
@@ -1429,10 +1432,10 @@ local function gear_row_status(item, set_path)
         return state_out
     end
 
-    if expected == 'empty' then
+    if spec.expected_empty or expected == 'empty' then
         if equipped and equipped.empty then
             state_out.status = 'EQUIP'
-            state_out.badge = ''
+            state_out.badge = 'EMPTY'
             state_out.color = cfg.row_fg_green
             state_out.reason = 'Slot is empty as expected.'
         else
@@ -2742,7 +2745,14 @@ end
 
 local function exact_match_state(spec, item)
     if not spec or not item or item.empty then
+        if spec and spec.expected_empty and item and item.empty then
+            return true, true, true, true
+        end
         return false, false, false
+    end
+
+    if spec and spec.expected_empty then
+        return false, false, false, item.augments_available ~= false
     end
 
     local id_match = false
