@@ -75,6 +75,8 @@ local function find_upvalue_value(fn, target_name)
     return holder and holder.value or nil
 end
 
+local backend_state = find_upvalue_value(original_show_preview, 'state')
+
 local function note_key_for_node(node)
     if not node then return nil end
 
@@ -96,9 +98,7 @@ end
 
 local function selected_note_key()
     local node = backend.get_selected_node and backend.get_selected_node() or nil
-    if not node then
-        return nil, 'Highlight a set or folder first.'
-    end
+    if not node then return nil, 'Highlight a set or folder first.' end
 
     local key = note_key_for_node(node)
     if not key or key == '' then
@@ -114,16 +114,11 @@ local function note_for_node(node)
     return notes.get(key) or ''
 end
 
-local function add_note_metadata(node, info)
-    info = info or {}
-    -- Keep notes as metadata only. Do not inject them into plain_english,
-    -- because that makes the note look like it overwrote the generated summary.
+semantics.build_set_info = function(node)
+    local info = original_build_set_info(node) or {}
+    -- Keep notes as metadata only. Do not inject them into plain_english.
     info.user_note = note_for_node(node)
     return info
-end
-
-semantics.build_set_info = function(node)
-    return add_note_metadata(node, original_build_set_info(node) or {})
 end
 
 local function append_line(out, text, color)
@@ -158,9 +153,7 @@ local function append_wrapped(out, text, color)
     end
 
     if text:sub(-1) ~= '\n' then text = text .. '\n' end
-    for raw in text:gmatch('(.-)\n') do
-        append_one(raw)
-    end
+    for raw in text:gmatch('(.-)\n') do append_one(raw) end
 end
 
 local function append_notes_section_to_cards(cards, node)
@@ -177,8 +170,6 @@ local function append_notes_section_to_cards(cards, node)
         append_wrapped(summary, note, NOTE_TEXT_COLOR)
     end
 
-    -- Category/summary-only cards share the same table across tabs. Normal gear
-    -- sets only need the Summary card changed.
     if cards.summary_only then
         cards.gear = summary
         cards.changes = summary
@@ -195,6 +186,7 @@ end
 local function clean_augment_text(value)
     local text = tostring(value or '')
     text = text:gsub('\r', ' '):gsub('\n', ' ')
+    text = text:gsub('[_%-]+', ' ')
     text = text:gsub('%s+', ' ')
     text = text:gsub('^%s+', ''):gsub('%s+$', '')
     return text
@@ -211,17 +203,17 @@ local function compact_path_rank(augments)
         local lower = text:lower()
 
         if not path then
-            path = text:match('[Pp]ath%s*:?[ %t]*([A-Fa-f])')
-                or text:match('^%s*([A-Fa-f])%s*[Pp]ath')
+            path = lower:match('path%s*[: ]?%s*([a-z])')
+                or lower:match('^%s*([a-z])%s*path')
         end
 
         if not rank then
-            rank = text:match('[Rr]ank%s*:?[ %t]*(%d+)')
-                or text:match('^%s*[Rr]%s*:?[ %t]*(%d+)%s*$')
-        end
-
-        if not rank and lower:find('rank', 1, true) then
-            rank = text:match('(%d+)')
+            if lower:find('rank', 1, true) then
+                rank = lower:match('rank%s*[: ]?%s*(%d+)') or lower:match('(%d+)')
+            else
+                rank = lower:match('^%s*r%s*[: ]?%s*(%d+)%s*$')
+                    or lower:match('^%s*r(%d+)%s*$')
+            end
         end
     end
 
@@ -236,9 +228,7 @@ end
 
 local function augment_label(kind, augments)
     local compact = compact_path_rank(augments)
-    if compact then
-        return '[' .. kind .. ' ' .. compact .. ']'
-    end
+    if compact then return '[' .. kind .. ' ' .. compact .. ']' end
     return '[' .. kind .. ']'
 end
 
@@ -268,32 +258,23 @@ local function apply_augment_label_to_row(row, label)
         left = left:gsub('%s+$', '') .. ' ' .. label
     end
 
-    if item_width then
-        row.text = fit_text(left, item_width) .. right
-    else
-        row.text = left
-    end
+    row.text = item_width and (fit_text(left, item_width) .. right) or left
 end
 
-local function first_augments_for_item_id(item_id, cards)
-    local locations
-
-    -- ui_facelift stores inventory on an internal state table. That table is not
-    -- exported, so this function only uses row data unless future refactoring
-    -- exposes inventory locations directly to this integration layer.
-    if cards and cards.inventory_locations and cards.inventory_locations.items_by_id then
-        locations = cards.inventory_locations.items_by_id[item_id]
-    end
+local function first_augments_for_item_id(item_id)
+    local locations = backend_state
+        and backend_state.inventory_locations
+        and backend_state.inventory_locations.items_by_id
+        and backend_state.inventory_locations.items_by_id[item_id]
 
     if type(locations) ~= 'table' then return nil end
-
     for _, location in ipairs(locations) do
         if has_augments(location and location.augments) then return location.augments end
     end
     return nil
 end
 
-local function augment_hints_for_row(row, cards)
+local function augment_hints_for_row(row)
     if not row or not row.text then return end
 
     local expected_augments = row.expected_augments or {}
@@ -306,7 +287,7 @@ local function augment_hints_for_row(row, cards)
     if row.id_match == true and has_augments(row.equipped_augments) then
         actual_augments = row.equipped_augments
     elseif row.expected_item_id ~= nil then
-        actual_augments = first_augments_for_item_id(row.expected_item_id, cards)
+        actual_augments = first_augments_for_item_id(row.expected_item_id)
     end
 
     if has_augments(actual_augments) then
@@ -321,11 +302,7 @@ end
 
 local function add_augment_hints_to_cards(cards)
     if type(cards) ~= 'table' or type(cards.gear) ~= 'table' then return cards end
-
-    for _, row in ipairs(cards.gear) do
-        augment_hints_for_row(row, cards)
-    end
-
+    for _, row in ipairs(cards.gear) do augment_hints_for_row(row) end
     return cards
 end
 
@@ -348,9 +325,7 @@ local function patch_lookup_cache()
     local function cached_lookup(name)
         local key = language_key() .. '\31' .. tostring(name or '')
         local cached = cache[key]
-        if cached ~= nil then
-            return cached ~= false and cached or nil
-        end
+        if cached ~= nil then return cached ~= false and cached or nil end
 
         local result = original_lookup(name)
         cache[key] = result or false
@@ -435,9 +410,6 @@ local function handle_note_command(args)
     return true
 end
 
--- Register the real note handler here. Windower still calls every addon-command
--- handler registered by this addon, so we also wrap later registrations to keep
--- the main GearTree command dispatcher from printing "Unknown command: note".
 if original_register_event then
     original_register_event('addon command', function(cmd, ...)
         if not is_note_command(cmd) then return false end
@@ -447,9 +419,7 @@ if original_register_event then
     windower.register_event = function(event_name, callback)
         if event_name == 'addon command' and type(callback) == 'function' then
             return original_register_event(event_name, function(cmd, ...)
-                if is_note_command(cmd) then
-                    return true
-                end
+                if is_note_command(cmd) then return true end
                 return callback(cmd, ...)
             end)
         end
