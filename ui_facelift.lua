@@ -785,6 +785,127 @@ local function augment_list(value)
     return out
 end
 
+local function normalize_augment_label(text)
+    text = tostring(text or '')
+    text = text:gsub("%c", " ")
+    text = text:gsub("[" .. '"' .. "‘’“”" .. "]", "")
+    text = text:gsub("\194\160", " ")
+    text = text:lower()
+    text = text:gsub('%s+', ' ')
+    text = text:gsub('^%s+', ''):gsub('%s+$', '')
+    return text
+end
+
+local function augment_signature(value)
+    local numeric = {}
+    local raw = {}
+
+    local function add_raw(text)
+        text = normalize_augment_label(text)
+        if text ~= '' then
+            raw[text] = (raw[text] or 0) + 1
+        end
+    end
+
+    local function add_numeric(label, amount, is_percent)
+        label = normalize_augment_label(label)
+        if label == '' then
+            add_raw(tostring(amount) .. (is_percent and '%' or ''))
+            return
+        end
+        local key = label .. '|' .. (is_percent and 'pct' or 'num')
+        numeric[key] = (numeric[key] or 0) + amount
+    end
+
+    local function consume(fragment)
+        fragment = trim(fragment)
+        if fragment == '' or fragment == 'none' then return end
+
+        local pos = 1
+        local found = false
+        while pos <= #fragment do
+            local s, e, amount_text = fragment:find('([+-]?%d+%%?)', pos)
+            if not s then
+                local tail = trim(fragment:sub(pos))
+                if tail ~= '' then add_raw(tail) end
+                break
+            end
+
+            local label = trim(fragment:sub(pos, s - 1))
+            local amount = tonumber((amount_text or ''):gsub('%%', ''))
+            if amount then
+                add_numeric(label, amount, amount_text:sub(-1) == '%')
+                found = true
+            else
+                add_raw(fragment:sub(pos, e))
+            end
+            pos = e + 1
+        end
+
+        if not found and next(raw) == nil and next(numeric) == nil then
+            add_raw(fragment)
+        end
+    end
+
+    if type(value) == 'table' then
+        for _, augment in ipairs(value) do
+            consume(augment)
+        end
+    else
+        for fragment in tostring(value or ''):gmatch('[^;]+') do
+            consume(fragment)
+        end
+    end
+
+    return { numeric = numeric, raw = raw }
+end
+
+local function signature_has_data(sig)
+    return sig and (next(sig.numeric or {}) ~= nil or next(sig.raw or {}) ~= nil)
+end
+
+local function augment_signature_of(value)
+    if signature_has_data(value) then
+        return value
+    end
+    return augment_signature(value)
+end
+
+local function same_augment_signature(left, right)
+    local a = augment_signature_of(left)
+    local b = augment_signature_of(right)
+    if not signature_has_data(a) and not signature_has_data(b) then
+        return true
+    end
+    if signature_has_data(a) ~= signature_has_data(b) then
+        return false
+    end
+
+    for key, value in pairs(a.numeric or {}) do
+        if (b.numeric or {})[key] ~= value then
+            return false
+        end
+    end
+    for key, value in pairs(b.numeric or {}) do
+        if (a.numeric or {})[key] ~= value then
+            return false
+        end
+    end
+
+    for key, value in pairs(a.raw or {}) do
+        if (b.raw or {})[key] ~= value then
+            return false
+        end
+    end
+    for key, value in pairs(b.raw or {}) do
+        if (a.raw or {})[key] ~= value then
+            return false
+        end
+    end
+
+    return true
+end
+
 local function same_augments(left, right)
     local a = augment_list(left)
     local b = augment_list(right)
@@ -814,11 +935,12 @@ end
 
 local function resolve_gear_spec(value)
     local display_name, augments, augmented, unresolved = gear_display(value)
+    local aug_list = augment_list(augments)
     local spec = {
         display_name = display_name,
         item_id = nil,
-        augments = augment_list(augments),
-        has_augments = augmented == true or #augment_list(augments) > 0,
+        augments = aug_list,
+        has_augments = augmented == true or #aug_list > 0,
         unresolved = unresolved == true,
     }
 
@@ -937,8 +1059,16 @@ local function gear_line_status(item, set_path)
         return 'MISS', cfg.row_fg_red
     end
 
-    if equipped and not equipped.empty and spec.item_id and equipped.id == spec.item_id and same_augments(spec.augments, equipped.augments) then
-        return 'EQUIP', cfg.row_fg_green
+    if equipped and not equipped.empty and spec.item_id and equipped.id == spec.item_id then
+        if not spec.has_augments or same_augments(spec.augments, equipped.augments) then
+            return 'EQUIP', cfg.row_fg_green
+        end
+    end
+
+    if equipped and not equipped.empty and spec.item_id == nil and spec.display_name and same_name(equipped.name, spec.display_name) then
+        if not spec.has_augments or same_augments(spec.augments, equipped.augments) then
+            return 'EQUIP', cfg.row_fg_green
+        end
     end
 
     local location, unavailable = best_location_exact(spec)
@@ -2134,6 +2264,222 @@ end
 
 function ui.get_selected_node()
     return selected_node()
+end
+
+local function augment_signature_text(sig)
+    if not sig then return 'none' end
+    if type(sig) == 'table' then
+        if #sig > 0 then
+            return table.concat(sig, ', ')
+        end
+        local out = {}
+        for k, v in pairs(sig) do
+            out[#out + 1] = tostring(k) .. '=' .. tostring(v)
+        end
+        table.sort(out)
+        return #out > 0 and table.concat(out, ' | ') or 'none'
+    end
+    return tostring(sig)
+end
+
+local function list_text(list)
+    if type(list) ~= 'table' or #list == 0 then
+        return 'none'
+    end
+    return table.concat(list, ', ')
+end
+
+local function normalize_debug_slot_input(slot)
+    local text = trim(slot):lower()
+    if text == '' then return nil end
+
+    text = text:gsub('[_%-]+', ' ')
+    text = text:gsub('%s+', ' ')
+    text = trim(text)
+
+    local aliases = {
+        ['ear 1'] = 'left_ear',
+        ['left ear'] = 'left_ear',
+        ['ear1'] = 'left_ear',
+        ['lear'] = 'left_ear',
+        ['ear 2'] = 'right_ear',
+        ['right ear'] = 'right_ear',
+        ['ear2'] = 'right_ear',
+        ['rear'] = 'right_ear',
+        ['ring 1'] = 'left_ring',
+        ['left ring'] = 'left_ring',
+        ['ring1'] = 'left_ring',
+        ['lring'] = 'left_ring',
+        ['ring 2'] = 'right_ring',
+        ['right ring'] = 'right_ring',
+        ['ring2'] = 'right_ring',
+        ['rring'] = 'right_ring',
+        ['ranged'] = 'range',
+    }
+
+    if aliases[text] then
+        return aliases[text]
+    end
+
+    local compact = text:gsub('%s+', '_')
+    return gear_slots.canonical(compact) or gear_slots.canonical(text)
+end
+
+local function exact_match_state(spec, item)
+    if not spec or not item or item.empty then
+        return false, false, false
+    end
+
+    local id_match = false
+    if spec.item_id then
+        id_match = item.id == spec.item_id
+    end
+
+    local augment_match = true
+    if spec.has_augments then
+        augment_match = same_augments(spec.augments, item.augments)
+    end
+
+    return id_match, augment_match, id_match and augment_match
+end
+
+local function debug_slot_entry(node, slot_text)
+    if not node or not node.has_gear then
+        return nil, nil, 'Select a gear set first.'
+    end
+
+    local canonical_slot = normalize_debug_slot_input(slot_text)
+    if not canonical_slot then
+        return nil, nil, 'Usage: //gt debugslot <slot>'
+    end
+
+    for _, item in ipairs(tree.gear_preview(node) or {}) do
+        if gear_slots.canonical(item.slot) == canonical_slot then
+            return item, canonical_slot
+        end
+    end
+
+    return nil, canonical_slot, 'That set does not define slot: ' .. slot_label(canonical_slot)
+end
+
+function ui.debug_selected_gear()
+    local node = selected_node()
+    if not node or not is_equippable_leaf(node) then
+        return nil, 'Select a gear row first.'
+    end
+
+    local lines = {}
+    lines[#lines + 1] = 'Path: ' .. path_string(node)
+
+    for _, item in ipairs(tree.gear_preview(node) or {}) do
+        local spec = resolve_gear_spec(item.value)
+        local equipped = equipped_item_for_slot(item.slot)
+        lines[#lines + 1] = string.format(
+            '%s expected="%s" id=%s expected_aug=%s',
+            slot_label(item.slot),
+            tostring(spec.display_name or ''),
+            tostring(spec.item_id or 'nil'),
+            list_text(spec.augments)
+        )
+        lines[#lines + 1] = string.format(
+            '  equipped="%s" id=%s aug_list=%s raw=%s',
+            tostring(equipped and equipped.name or 'nil'),
+            tostring(equipped and equipped.id or 'nil'),
+            list_text(equipped and equipped.augments or nil),
+            tostring(equipped and equipped.extdata or 'nil')
+        )
+    end
+
+    return lines
+end
+
+function ui.debug_selected_slot(slot)
+    local node = selected_node()
+    local preview_item, canonical_slot, err = debug_slot_entry(node, slot)
+    if not preview_item then
+        return nil, err
+    end
+
+    local spec = resolve_gear_spec(preview_item.value)
+    local equipped = equipped_item_for_slot(canonical_slot)
+    local path = path_string(node)
+    local lines = {}
+
+    lines[#lines + 1] = 'EXPECTED FROM LUA:'
+    lines[#lines + 1] = '  selected set path: ' .. path
+    lines[#lines + 1] = '  slot: ' .. slot_label(canonical_slot) .. ' (' .. canonical_slot .. ')'
+    lines[#lines + 1] = '  raw Lua value: ' .. tostring(preview_item.value or '')
+    lines[#lines + 1] = '  resolved expected name: ' .. tostring(spec.display_name or 'none')
+    lines[#lines + 1] = '  resolved expected item ID: ' .. tostring(spec.item_id or 'none')
+    lines[#lines + 1] = '  expected augments from Lua: ' .. list_text(spec.augments)
+
+    local equipped_name = (equipped and not equipped.empty) and equipped.name or 'empty'
+    local equipped_id = (equipped and not equipped.empty) and equipped.id or 'none'
+    local equipped_augs = (equipped and not equipped.empty) and equipped.augments or nil
+    local id_match, augment_match = exact_match_state(spec, equipped)
+
+    lines[#lines + 1] = 'CURRENT EQUIPPED SLOT:'
+    lines[#lines + 1] = '  equipped item name: ' .. tostring(equipped_name)
+    lines[#lines + 1] = '  equipped item ID: ' .. tostring(equipped_id)
+    lines[#lines + 1] = '  equipped augments: ' .. list_text(equipped_augs)
+    lines[#lines + 1] = '  ID match: ' .. tostring(id_match)
+    lines[#lines + 1] = '  augment match: ' .. tostring(augment_match)
+
+    lines[#lines + 1] = 'INVENTORY / STORAGE SEARCH:'
+    if not spec.item_id then
+        lines[#lines + 1] = '  no matching item ID found anywhere.'
+    else
+        local matches = item_locations_by_id(spec.item_id)
+        if #matches == 0 then
+            lines[#lines + 1] = '  no matching item ID found anywhere.'
+        else
+            for _, location in ipairs(matches) do
+                local _, _, exact = exact_match_state(spec, location)
+                lines[#lines + 1] = string.format(
+                    '  - %s | bag=%s idx=%s avail=%s equip_ready=%s | id=%s | augments=%s | exact=%s',
+                    tostring(location.label or bag_label(location.bag)),
+                    tostring(location.bag or 'none'),
+                    tostring(location.index or 'none'),
+                    tostring(location.available == true),
+                    tostring(location.equip_ready == true),
+                    tostring(location.id or 'none'),
+                    list_text(location.augments),
+                    tostring(exact)
+                )
+            end
+        end
+    end
+
+    lines[#lines + 1] = 'FINAL RESULT:'
+    if not spec.item_id then
+        lines[#lines + 1] = '  UNKN because the Lua value could not be resolved to an item ID.'
+        return lines
+    end
+
+    if id_match and augment_match and equipped and not equipped.empty then
+        lines[#lines + 1] = '  EQUIP because the equipped slot exactly matches the expected item ID and augments.'
+        return lines
+    end
+
+    local location, unavailable = best_location_exact(spec)
+    if location then
+        local badge = where_badge_from_label(location.label or bag_label(location.bag))
+        if unavailable then
+            lines[#lines + 1] = '  ' .. badge .. ' because an exact match exists only in an unavailable bag: ' .. tostring(location.label or bag_label(location.bag)) .. '.'
+        else
+            lines[#lines + 1] = '  ' .. badge .. ' because an exact match exists in ' .. tostring(location.label or bag_label(location.bag)) .. '.'
+        end
+        return lines
+    end
+
+    local matches = item_locations_by_id(spec.item_id)
+    if #matches > 0 then
+        lines[#lines + 1] = '  MISS because the item ID exists somewhere, but no exact augment match was found.'
+    else
+        lines[#lines + 1] = '  MISS because no matching item ID was found anywhere.'
+    end
+
+    return lines
 end
 
 function ui.select_path(path)

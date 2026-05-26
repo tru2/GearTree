@@ -84,6 +84,18 @@ function adapter.get_selected_node()
     return backend.get_selected_node()
 end
 
+function adapter.debug_selected_gear()
+    if backend.debug_selected_gear then
+        return backend.debug_selected_gear()
+    end
+end
+
+function adapter.debug_selected_slot(slot)
+    if backend.debug_selected_slot then
+        return backend.debug_selected_slot(slot)
+    end
+end
+
 function adapter.select_path(path)
     if backend.select_path then
         return backend.select_path(path)

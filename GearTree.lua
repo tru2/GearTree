@@ -1334,6 +1334,48 @@ local function show_status()
     end
 end
 
+local function handle_augdebug_command()
+    if not ensure_ui() then return end
+
+    local lines, err
+    if ui.debug_selected_gear then
+        lines, err = ui.debug_selected_gear()
+    end
+    if not lines then
+        gt_chat(CHAT.warn, err or 'Select a gear row first.')
+        return
+    end
+
+    gt_chat(CHAT.info, 'Augment debug')
+    for _, line in ipairs(lines) do
+        gt_chat(CHAT.detail, line)
+    end
+end
+
+local function handle_debugslot_command(args)
+    local slot = table.concat(args or {}, ' '):gsub('^%s+', ''):gsub('%s+$', '')
+    if slot == '' then
+        gt_chat(CHAT.warn, 'Usage: //gt debugslot <slot>')
+        return
+    end
+
+    if not ensure_ui() then return end
+
+    local lines, err
+    if ui.debug_selected_slot then
+        lines, err = ui.debug_selected_slot(slot)
+    end
+    if not lines then
+        gt_chat(CHAT.warn, err or 'Select a gear set first.')
+        return
+    end
+
+    gt_chat(CHAT.info, 'Slot debug: ' .. slot)
+    for _, line in ipairs(lines) do
+        gt_chat(CHAT.detail, line)
+    end
+end
+
 local function arg_text(args, first)
     local out = {}
     for i = first or 1, #(args or {}) do
@@ -1840,6 +1882,10 @@ windower.register_event('addon command', function(cmd, ...)
         if ui.cursor_left then ui.cursor_left() else ui.cursor_back() end
     elseif cmd == 'status' then
         show_status()
+    elseif cmd == 'augdebug' or cmd == 'debugaug' then
+        handle_augdebug_command()
+    elseif cmd == 'debugslot' then
+        handle_debugslot_command(args)
     elseif cmd == 'make' then
         handle_make_command(args)
     elseif cmd == 'move' then
@@ -1860,6 +1906,8 @@ windower.register_event('addon command', function(cmd, ...)
         log('  //gt undo            - restore the backup from the last GearTree save')
         log('  //gt last            - jump back to the last saved set')
         log('  //gt open            - open highlighted set source near its Lua line')
+        log('  //gt augdebug        - print item ID, augments, and raw extdata for the selected gear row')
+        log('  //gt debugslot <slot> - print expected/equipped/storage details for one slot')
         log('  //gt find <text>     - jump to a matching set, folder, or gear line')
         log('  //gt status          - show loaded file, mode, selection, changes, unresolved refs')
         log('  //gt edit [on|off|toggle] - auto-equip highlighted sets and track live changes')
