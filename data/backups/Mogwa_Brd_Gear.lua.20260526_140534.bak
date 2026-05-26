@@ -90,14 +90,14 @@ function init_gear_sets()
 	sets.precast.FC.Mazurka = set_combine(sets.precast.FC.BardSong,{range="Marsyas"})
 	sets.precast.FC['Honor March'] = set_combine(sets.precast.FC.BardSong,{range="Marsyas"})
 
-	sets.precast.FC.Daurdabla = set_combine(sets.precast.FC.BardSong, {range=info.ExtraSongInstrument})
+	sets.precast.FC.Daurdabla = set_combine(sets.precast.FC.BardSong, {range="Daurdabla"})
 	sets.precast.DaurdablaDummy = sets.precast.FC.Daurdabla
 		
 	
 	-- Precast sets to enhance JAs
 	
-	sets.precast.JA.Nightingale = {feet="Bihu Slippers "}
-	sets.precast.JA.Troubadour = {body="Bihu Jstcorps "}
+	sets.precast.JA.Nightingale = {feet="Bihu Slippers"}
+	sets.precast.JA.Troubadour = {body={ name="Bihu Jstcorps +1", augments={'Enhances "Troubadour" effect'} }}
 	sets.precast.JA['Soul Voice'] = {legs="Bihu Cannions +1"}
 
 	-- Waltz set (chr and vit)
@@ -150,7 +150,7 @@ sets.precast.WS['Savage Blade'] = {ammo="Aurgelmir Orb +1",
 		back="Intarabus's Cape",waist="Witful Belt",legs="Aya. Cosciales +2",feet="Gende. Galosh. +1"}
 
 	-- Gear to enhance certain classes of songs.  No instruments added here since Gjallarhorn is being used.
-	sets.midcast.Ballad = {legs="Fili Rhingrave +1"}
+	sets.midcast.Ballad = {legs="Fili Rhingrave"}
 	sets.midcast.Lullaby = {"Brioso Cuffs +3"}
 	sets.midcast['Horde Lullaby'] = {range="Marsyas"}
 	sets.midcast['Horde Lullaby'].Resistant = {range="Gjallarhorn"}
