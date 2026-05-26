@@ -362,22 +362,22 @@ local function add_leaf(parent, label, assignment)
     return leaf
 end
 
-local function is_empty_plain_table_assignment(assignment)
+local function has_direct_gear_slots(assignment)
     local rhs = assignment and assignment.rhs
-    if not rhs or rhs.kind ~= 'table' then return false end
+    if not rhs then return false end
 
     for _ in pairs(rhs.slots or {}) do
-        return false
+        return true
     end
 
-    return true
+    return false
 end
 
 function organized_tree.build_organized_tree(assignments)
     reset_order()
     local root = new_node('Gear Sets', { 'sets' })
     for _, assignment in ipairs(assignments or {}) do
-        if not is_empty_plain_table_assignment(assignment) then
+        if has_direct_gear_slots(assignment) then
             local parent = root
             local route_parts = organized_tree.get_organized_route(assignment)
             for _, folder in ipairs(route_parts) do
