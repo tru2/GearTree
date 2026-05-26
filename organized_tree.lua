@@ -145,6 +145,13 @@ local function contains_text(value, text)
     return tostring(value or ''):lower():find(tostring(text or ''):lower(), 1, true) ~= nil
 end
 
+local function normalize_display_key(value)
+    local text = tostring(value or ''):lower()
+    text = text:gsub('&', 'and')
+    text = text:gsub('[%s_%-%p]+', '')
+    return text
+end
+
 local function refs_contain(assignment, text)
     local rhs = assignment and assignment.rhs
     if not rhs then return false end
@@ -373,6 +380,14 @@ local function has_direct_gear_slots(assignment)
     return false
 end
 
+local function trim_redundant_terminal_folder(route_parts, label)
+    if #route_parts == 0 then return route_parts end
+    if normalize_display_key(route_parts[#route_parts]) == normalize_display_key(label) then
+        table.remove(route_parts, #route_parts)
+    end
+    return route_parts
+end
+
 local function prune_empty_folders(node)
     if not node or not node.children then return false end
 
@@ -395,11 +410,12 @@ function organized_tree.build_organized_tree(assignments)
     for _, assignment in ipairs(assignments or {}) do
         if has_direct_gear_slots(assignment) then
             local parent = root
-            local route_parts = organized_tree.get_organized_route(assignment)
+            local label = organized_tree.leaf_label(assignment)
+            local route_parts = trim_redundant_terminal_folder(organized_tree.get_organized_route(assignment), label)
             for _, folder in ipairs(route_parts) do
                 parent = ensure_folder(parent, folder)
             end
-            add_leaf(parent, organized_tree.leaf_label(assignment), assignment)
+            add_leaf(parent, label, assignment)
         end
     end
     prune_empty_folders(root)
