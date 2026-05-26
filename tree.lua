@@ -120,15 +120,46 @@ end
 ----------------------------------------------------------------------
 -- Walk the tree in display order, respecting expand state. Returns an
 -- ordered list of {node, depth, is_last_at_depth} suitable for rendering.
+--
+-- Redundant singleton wrappers are flattened for display only. Example:
+--   sets.buff.Doom.Doom
+-- renders as a single "Doom" leaf under buff instead of a folder "Doom"
+-- containing one child set also named "Doom". The underlying node/path is
+-- untouched, so equip commands and source references still target the real
+-- GearSwap set.
+
+local function normalize_display_key(value)
+    local text = tostring(value or '')
+    text = text:lower()
+    text = text:gsub("[%s_%-%p]+", "")
+    return text
+end
+
+local function is_redundant_singleton_wrapper(node)
+    if not node or node.has_gear then return false end
+    if not node.children or #node.children ~= 1 then return false end
+
+    local child = node.children[1]
+    if not child or not child.has_gear then return false end
+    if child.children and #child.children > 0 then return false end
+
+    return normalize_display_key(node.key) == normalize_display_key(child.key)
+end
 
 function tree.flatten(root)
     local out = {}
     local function walk(node, depth)
         -- Skip root itself; children of root are the top-level entries
         for _, child in ipairs(node.children) do
-            out[#out + 1] = { node = child, depth = depth }
-            if child.expanded and #child.children > 0 then
-                walk(child, depth + 1)
+            if is_redundant_singleton_wrapper(child) then
+                -- Display the real gear set at the wrapper's depth. This removes
+                -- the visual duplicate without mutating the semantic tree.
+                out[#out + 1] = { node = child.children[1], depth = depth }
+            else
+                out[#out + 1] = { node = child, depth = depth }
+                if child.expanded and #child.children > 0 then
+                    walk(child, depth + 1)
+                end
             end
         end
     end
