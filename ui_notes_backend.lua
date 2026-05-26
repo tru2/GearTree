@@ -75,22 +75,43 @@ local function find_upvalue_value(fn, target_name)
     return holder and holder.value or nil
 end
 
-local function selected_path()
+local function note_key_for_node(node)
+    if not node then return nil end
+
+    if node.path then
+        local key = tree.path_string(node)
+        if key and key ~= '' then return key end
+    end
+
+    if node.virtual and node.virtual_id then
+        return 'virtual:' .. tostring(node.virtual_id)
+    end
+
+    if node.key then
+        return 'node:' .. tostring(node.key)
+    end
+
+    return nil
+end
+
+local function selected_note_key()
     local node = backend.get_selected_node and backend.get_selected_node() or nil
-    if not node or node.virtual or not node.path then
-        return nil, 'Highlight a real Lua set first.'
+    if not node then
+        return nil, 'Highlight a set or folder first.'
     end
-    if not node.has_gear then
-        return nil, 'Highlight a gear set first.'
+
+    local key = note_key_for_node(node)
+    if not key or key == '' then
+        return nil, 'Could not make a stable note key for the highlighted item.'
     end
-    return tree.path_string(node), nil
+
+    return key, nil
 end
 
 local function note_for_node(node)
-    if not node or node.virtual or not node.path then return '' end
-    local path = tree.path_string(node)
-    if path == '' then return '' end
-    return notes.get(path) or ''
+    local key = note_key_for_node(node)
+    if not key or key == '' then return '' end
+    return notes.get(key) or ''
 end
 
 local function add_note_metadata(node, info)
@@ -372,9 +393,9 @@ local function refresh_preview()
 end
 
 local function handle_note_command(args)
-    local path, path_err = selected_path()
-    if not path then
-        gt_chat(CHAT.warn, path_err or 'Highlight a gear set first.')
+    local key, key_err = selected_note_key()
+    if not key then
+        gt_chat(CHAT.warn, key_err or 'Highlight a set or folder first.')
         return true
     end
 
@@ -382,34 +403,34 @@ local function handle_note_command(args)
     local lower = text:lower()
 
     if text == '' or lower == 'show' then
-        local note = notes.get(path)
+        local note = notes.get(key)
         if note == '' then
-            gt_chat(CHAT.info, 'No note for ' .. path)
+            gt_chat(CHAT.info, 'No note for ' .. key)
         else
-            gt_chat(CHAT.info, 'Note for ' .. path)
+            gt_chat(CHAT.info, 'Note for ' .. key)
             gt_chat(CHAT.detail, note)
         end
         return true
     end
 
     if lower == 'clear' or lower == 'delete' or lower == 'remove' then
-        local ok, err = notes.clear(path)
+        local ok, err = notes.clear(key)
         if not ok then
             gt_chat(CHAT.error, 'Note clear failed: ' .. tostring(err))
             return true
         end
-        gt_chat(CHAT.success, 'Cleared note for ' .. path)
+        gt_chat(CHAT.success, 'Cleared note for ' .. key)
         refresh_preview()
         return true
     end
 
-    local ok, err = notes.set(path, text)
+    local ok, err = notes.set(key, text)
     if not ok then
         gt_chat(CHAT.error, 'Note save failed: ' .. tostring(err))
         return true
     end
 
-    gt_chat(CHAT.success, 'Saved note for ' .. path)
+    gt_chat(CHAT.success, 'Saved note for ' .. key)
     refresh_preview()
     return true
 end
