@@ -1,6 +1,10 @@
--- GearTree notes integration layer
--- Wraps the facelift backend so personal notes can be displayed and edited
--- without changing GearSwap Lua source files.
+-- GearTree UI integration layer
+-- Wraps the facelift backend so personal notes and small preview enhancements
+-- can be added without changing GearSwap Lua source files.
+--
+-- This is intentionally kept as a single bridge layer. Do not add more wrapper
+-- backends for future UI behavior; fold new UI work into ui_facelift.lua during
+-- the next cleanup/refactor pass.
 
 local tree = require('tree')
 local notes = require('notes')
@@ -44,14 +48,31 @@ end
 local function find_upvalue_holder(fn, target_name)
     if not can_patch_upvalues() or type(fn) ~= 'function' then return nil end
 
-    for i = 1, 100 do
-        local name, value = debug.getupvalue(fn, i)
-        if not name then break end
-        if name == target_name then
-            return { owner = fn, index = i, value = value }
+    local seen = {}
+    local function walk(current, depth)
+        if type(current) ~= 'function' or seen[current] or depth > 12 then return nil end
+        seen[current] = true
+
+        for i = 1, 120 do
+            local name, value = debug.getupvalue(current, i)
+            if not name then break end
+            if name == target_name then
+                return { owner = current, index = i, value = value }
+            end
+            if type(value) == 'function' then
+                local found = walk(value, depth + 1)
+                if found then return found end
+            end
         end
+        return nil
     end
-    return nil
+
+    return walk(fn, 0)
+end
+
+local function find_upvalue_value(fn, target_name)
+    local holder = find_upvalue_holder(fn, target_name)
+    return holder and holder.value or nil
 end
 
 local function selected_path()
@@ -146,23 +167,200 @@ local function append_notes_section_to_cards(cards, node)
     return cards
 end
 
+local function has_augments(value)
+    return type(value) == 'table' and #value > 0
+end
+
+local function clean_augment_text(value)
+    local text = tostring(value or '')
+    text = text:gsub('\r', ' '):gsub('\n', ' ')
+    text = text:gsub('%s+', ' ')
+    text = text:gsub('^%s+', ''):gsub('%s+$', '')
+    return text
+end
+
+local function compact_path_rank(augments)
+    if type(augments) ~= 'table' then return nil end
+
+    local path
+    local rank
+
+    for _, augment in ipairs(augments) do
+        local text = clean_augment_text(augment)
+        local lower = text:lower()
+
+        if not path then
+            path = text:match('[Pp]ath%s*:?[ %t]*([A-Fa-f])')
+                or text:match('^%s*([A-Fa-f])%s*[Pp]ath')
+        end
+
+        if not rank then
+            rank = text:match('[Rr]ank%s*:?[ %t]*(%d+)')
+                or text:match('^%s*[Rr]%s*:?[ %t]*(%d+)%s*$')
+        end
+
+        if not rank and lower:find('rank', 1, true) then
+            rank = text:match('(%d+)')
+        end
+    end
+
+    if path then path = path:upper() end
+    if rank then rank = tostring(tonumber(rank) or rank) end
+
+    if path and rank then return path .. '/R' .. rank end
+    if path then return path end
+    if rank then return 'R' .. rank end
+    return nil
+end
+
+local function augment_label(kind, augments)
+    local compact = compact_path_rank(augments)
+    if compact then
+        return '[' .. kind .. ' ' .. compact .. ']'
+    end
+    return '[' .. kind .. ']'
+end
+
+local function fit_text(text, width)
+    text = tostring(text or '')
+    width = tonumber(width) or #text
+    if width <= 0 then return '' end
+    if #text > width then
+        if width <= 3 then return text:sub(1, width) end
+        return text:sub(1, width - 3) .. '...'
+    end
+    return text .. string.rep(' ', width - #text)
+end
+
+local function apply_augment_label_to_row(row, label)
+    if not row or not row.text or not label then return end
+
+    local text = tostring(row.text or '')
+    local where_col = tonumber(row.aug_tag_col)
+    local item_width = where_col and math.max(1, where_col - 2) or nil
+    local left = item_width and text:sub(1, item_width) or text
+    local right = item_width and text:sub(item_width + 1) or ''
+
+    if left:find('%[aug[^%]]*%]') then
+        left = left:gsub('%[aug[^%]]*%]', label, 1)
+    else
+        left = left:gsub('%s+$', '') .. ' ' .. label
+    end
+
+    if item_width then
+        row.text = fit_text(left, item_width) .. right
+    else
+        row.text = left
+    end
+end
+
+local function first_augments_for_item_id(item_id, cards)
+    local locations
+
+    -- ui_facelift stores inventory on an internal state table. That table is not
+    -- exported, so this function only uses row data unless future refactoring
+    -- exposes inventory locations directly to this integration layer.
+    if cards and cards.inventory_locations and cards.inventory_locations.items_by_id then
+        locations = cards.inventory_locations.items_by_id[item_id]
+    end
+
+    if type(locations) ~= 'table' then return nil end
+
+    for _, location in ipairs(locations) do
+        if has_augments(location and location.augments) then return location.augments end
+    end
+    return nil
+end
+
+local function augment_hints_for_row(row, cards)
+    if not row or not row.text then return end
+
+    local expected_augments = row.expected_augments or {}
+    if has_augments(expected_augments) then
+        apply_augment_label_to_row(row, augment_label('aug', expected_augments))
+        return
+    end
+
+    local actual_augments
+    if row.id_match == true and has_augments(row.equipped_augments) then
+        actual_augments = row.equipped_augments
+    elseif row.expected_item_id ~= nil then
+        actual_augments = first_augments_for_item_id(row.expected_item_id, cards)
+    end
+
+    if has_augments(actual_augments) then
+        apply_augment_label_to_row(row, augment_label('aug?', actual_augments))
+        local reason = tostring(row.status_reason or '')
+        if not reason:find('augmented copy', 1, true) then
+            row.status_reason = (reason ~= '' and (reason .. ' ') or '') ..
+                'Lua does not require augments, but an augmented copy was found.'
+        end
+    end
+end
+
+local function add_augment_hints_to_cards(cards)
+    if type(cards) ~= 'table' or type(cards.gear) ~= 'table' then return cards end
+
+    for _, row in ipairs(cards.gear) do
+        augment_hints_for_row(row, cards)
+    end
+
+    return cards
+end
+
+local function patch_lookup_cache()
+    local holder = find_upvalue_holder(original_show_preview, 'resource_lookup_result_for_name')
+    if not holder or type(holder.value) ~= 'function' then return false end
+
+    local original_lookup = holder.value
+    local current_resource_language = find_upvalue_value(original_show_preview, 'current_resource_language')
+    local cache = {}
+
+    local function language_key()
+        if type(current_resource_language) == 'function' then
+            local ok, value = pcall(current_resource_language)
+            if ok and value then return tostring(value) end
+        end
+        return 'unknown'
+    end
+
+    local function cached_lookup(name)
+        local key = language_key() .. '\31' .. tostring(name or '')
+        local cached = cache[key]
+        if cached ~= nil then
+            return cached ~= false and cached or nil
+        end
+
+        local result = original_lookup(name)
+        cache[key] = result or false
+        return result
+    end
+
+    debug.setupvalue(holder.owner, holder.index, cached_lookup)
+    return true
+end
+
 local function patch_preview_builder()
     local holder = find_upvalue_holder(original_show_preview, 'build_preview_cards')
     if not holder or type(holder.value) ~= 'function' then
-        gt_chat(CHAT.warn, 'Notes display hook was not installed; build_preview_cards not found.')
+        gt_chat(CHAT.warn, 'Preview hook was not installed; build_preview_cards not found.')
         return false
     end
 
     local original_build_preview_cards = holder.value
-    local function build_preview_cards_with_notes(node)
-        return append_notes_section_to_cards(original_build_preview_cards(node), node)
+    local function build_preview_cards_with_integrations(node)
+        local cards = original_build_preview_cards(node)
+        append_notes_section_to_cards(cards, node)
+        add_augment_hints_to_cards(cards)
+        return cards
     end
 
-    debug.setupvalue(holder.owner, holder.index, build_preview_cards_with_notes)
+    debug.setupvalue(holder.owner, holder.index, build_preview_cards_with_integrations)
     return true
 end
 
 patch_preview_builder()
+patch_lookup_cache()
 
 local function refresh_preview()
     local node = backend.get_selected_node and backend.get_selected_node() or nil
