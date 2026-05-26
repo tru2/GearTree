@@ -204,20 +204,124 @@ local function build_tree_for_mode(assignments)
 end
 
 local function parse_gear_references_from_source(refs, src)
-    local function extract_augments(body)
-        local block = tostring(body or ''):match('augments%s*=%s*{(.-)}')
-        if not block then return nil end
-
-        local augments = {}
-        for augment in block:gmatch('"([^"]+)"') do
-            augments[#augments + 1] = augment
+    local function skip_ws(text, pos)
+        while pos <= #text do
+            local ch = text:sub(pos, pos)
+            if ch ~= ' ' and ch ~= '\t' and ch ~= '\r' and ch ~= '\n' then
+                return pos
+            end
+            pos = pos + 1
         end
-        for augment in block:gmatch("'([^']+)'") do
-            augments[#augments + 1] = augment
-        end
+        return pos
+    end
 
-        if #augments == 0 then return nil end
-        return table.concat(augments, '; ')
+    local function decode_lua_escape(ch, next_ch)
+        if next_ch == 'n' then return '\n' end
+        if next_ch == 'r' then return '\r' end
+        if next_ch == 't' then return '\t' end
+        if next_ch == '\\' then return '\\' end
+        if next_ch == '"' then return '"' end
+        if next_ch == "'" then return "'" end
+        return next_ch
+    end
+
+    local function parse_quoted(text, pos)
+        local quote = text:sub(pos, pos)
+        local i = pos + 1
+        local out = {}
+        while i <= #text do
+            local ch = text:sub(i, i)
+            if ch == '\\' then
+                local next_ch = text:sub(i + 1, i + 1)
+                if next_ch == '' then
+                    break
+                end
+                out[#out + 1] = decode_lua_escape(ch, next_ch)
+                i = i + 2
+            elseif ch == quote then
+                return table.concat(out), i + 1
+            else
+                out[#out + 1] = ch
+                i = i + 1
+            end
+        end
+        return nil, pos
+    end
+
+    local function parse_balanced(text, pos, open_char, close_char)
+        local depth = 0
+        local i = pos
+        local start = pos
+        local quote = nil
+
+        while i <= #text do
+            local ch = text:sub(i, i)
+            if quote then
+                if ch == '\\' then
+                    i = i + 2
+                elseif ch == quote then
+                    quote = nil
+                    i = i + 1
+                else
+                    i = i + 1
+                end
+            elseif ch == '"' or ch == "'" then
+                quote = ch
+                i = i + 1
+            elseif ch == open_char then
+                depth = depth + 1
+                i = i + 1
+            elseif ch == close_char then
+                depth = depth - 1
+                i = i + 1
+                if depth == 0 then
+                    return text:sub(start, i - 1), i
+                end
+            else
+                i = i + 1
+            end
+        end
+        return nil, pos
+    end
+
+    local function parse_augment_list(text)
+        local list = {}
+        local pos = 1
+        while pos <= #text do
+            local ch = text:sub(pos, pos)
+            if ch == '"' or ch == "'" then
+                local value, next_pos = parse_quoted(text, pos)
+                if value then
+                    list[#list + 1] = value
+                    pos = next_pos
+                else
+                    pos = pos + 1
+                end
+            else
+                pos = pos + 1
+            end
+        end
+        return list
+    end
+
+    local function parse_alias_body(body)
+        local name = body:match('name%s*=%s*"([^"]+)"') or body:match("name%s*=%s*'([^']+)'")
+        local augments = nil
+        local aug_key = body:find('augments%s*=%s*{')
+        if aug_key then
+            local start = body:find('{', aug_key)
+            if start then
+                local block, _ = parse_balanced(body, start, '{', '}')
+                if block then
+                    local inner = block:sub(2, -2)
+                    local list = parse_augment_list(inner)
+                    if #list > 0 then
+                        augments = list
+                    end
+                end
+            end
+        end
+        return name, augments
     end
 
     local function remember(name, item, augments)
@@ -225,13 +329,33 @@ local function parse_gear_references_from_source(refs, src)
             refs['gear.' .. name] = {
                 name = item,
                 augments = augments,
-                augmented = augments ~= nil and augments ~= '',
+                augmented = type(augments) == 'table' and #augments > 0 or (augments ~= nil and augments ~= ''),
             }
         end
     end
 
-    for name, body in src:gmatch('gear%.([%a_][%w_]*)%s*=%s*({.-})') do
-        remember(name, body:match('name%s*=%s*"([^"]+)"') or body:match("name%s*=%s*'([^']+)'"), extract_augments(body))
+    local pos = 1
+    while true do
+        local start_pos, end_pos, name = src:find('gear%.([%a_][%w_]*)%s*=%s*', pos)
+        if not start_pos then break end
+
+        local value_pos = skip_ws(src, end_pos + 1)
+        local first = src:sub(value_pos, value_pos)
+        if first == '"' or first == "'" then
+            local item, next_pos = parse_quoted(src, value_pos)
+            remember(name, item, nil)
+            pos = next_pos > value_pos and next_pos or (end_pos + 1)
+        elseif first == '{' then
+            local body, next_pos = parse_balanced(src, value_pos, '{', '}')
+            if body then
+                remember(name, parse_alias_body(body))
+                pos = next_pos
+            else
+                pos = end_pos + 1
+            end
+        else
+            pos = end_pos + 1
+        end
     end
 
     for name, item in src:gmatch('gear%.([%a_][%w_]*)%s*=%s*"([^"\r\n]+)"') do
@@ -328,7 +452,7 @@ end
 local function inventory_item_augments(item)
     local ok, decoded = pcall(extdata.decode, item)
     if not ok or not decoded or type(decoded.augments) ~= 'table' then
-        return {}
+        return {}, false
     end
 
     local out = {}
@@ -338,7 +462,7 @@ local function inventory_item_augments(item)
             out[#out + 1] = augment
         end
     end
-    return out
+    return out, true
 end
 
 local function max_bag_index(bag)
@@ -419,11 +543,13 @@ local function scan_inventory_locations(force)
                     if name then
                         local key = normalize_item_name(name)
                         locations.items[key] = locations.items[key] or {}
+                        local augments, augments_available = inventory_item_augments(item)
                         local entry = {
                             id = item.id,
                             name = name,
                             extdata = item.extdata,
-                            augments = inventory_item_augments(item),
+                            augments = augments,
+                            augments_available = augments_available,
                             bag = def.id,
                             index = index,
                             label = def.label,
