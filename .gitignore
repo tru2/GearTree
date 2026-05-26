@@ -1,3 +1,10 @@
+# GearTree runtime/user data
+# These are created locally by the addon and should not be committed.
+data/settings.xml
+data/backups/
+data/notes/
+data/layouts/
+
 # Compiled Lua sources
 luac.out
 
@@ -35,7 +42,6 @@ luac.out
 *.exe
 *.out
 *.app
-*.i*86
+*.i386
 *.x86_64
 *.hex
-
