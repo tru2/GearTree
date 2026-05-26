@@ -1,4 +1,4 @@
-local backend = require('ui_facelift')
+local backend = require('ui_notes_backend')
 
 local adapter = {}
 
