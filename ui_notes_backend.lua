@@ -39,6 +39,25 @@ local function is_note_command(cmd)
     return cmd == 'note' or cmd == 'notes'
 end
 
+local function is_help_command(cmd)
+    cmd = tostring(cmd or ''):lower()
+    return cmd == 'help' or cmd == '?'
+end
+
+local function help_log(message)
+    if log then
+        log(message)
+    else
+        gt_chat(CHAT.info, message)
+    end
+end
+
+local function print_note_help()
+    help_log('  //gt note <text>     - save a personal note on highlighted set/folder')
+    help_log('  //gt note            - show the note for highlighted set/folder')
+    help_log('  //gt note clear      - clear the note for highlighted set/folder')
+end
+
 local function can_patch_upvalues()
     return type(debug) == 'table'
         and type(debug.getupvalue) == 'function'
@@ -313,10 +332,33 @@ end
 patch_preview_builder()
 patch_lookup_cache()
 
-local function refresh_preview()
+local function force_summary_after_note_refresh()
+    local state = backend_state
+    if not state or type(state.preview_cards) ~= 'table' then return end
+
+    if state.preview_cards.summary_only then
+        -- Category cards are summary-only. ui_facelift uses nil internally for
+        -- that mode, so do not force the literal Summary tab.
+        state.preview_card = nil
+        state.preview_lines = state.preview_cards.summary or state.preview_lines
+    else
+        state.preview_card = 'summary'
+        state.preview_lines = state.preview_cards.summary or state.preview_lines
+    end
+
+    state.preview_scroll = 0
+    state.source_cursor = 0
+    state.source_pan = 0
+end
+
+local function refresh_preview(prefer_summary)
     local node = backend.get_selected_node and backend.get_selected_node() or nil
     if node and backend.show_preview then
         backend.show_preview(node)
+        if prefer_summary then
+            force_summary_after_note_refresh()
+            if backend.refresh then backend.refresh() end
+        end
     elseif backend.refresh then
         backend.refresh()
     end
@@ -340,6 +382,7 @@ local function handle_note_command(args)
             gt_chat(CHAT.info, 'Note for ' .. key)
             gt_chat(CHAT.detail, note)
         end
+        refresh_preview(true)
         return true
     end
 
@@ -350,7 +393,7 @@ local function handle_note_command(args)
             return true
         end
         gt_chat(CHAT.success, 'Cleared note for ' .. key)
-        refresh_preview()
+        refresh_preview(true)
         return true
     end
 
@@ -361,7 +404,7 @@ local function handle_note_command(args)
     end
 
     gt_chat(CHAT.success, 'Saved note for ' .. key)
-    refresh_preview()
+    refresh_preview(true)
     return true
 end
 
@@ -375,7 +418,9 @@ if original_register_event then
         if event_name == 'addon command' and type(callback) == 'function' then
             return original_register_event(event_name, function(cmd, ...)
                 if is_note_command(cmd) then return true end
-                return callback(cmd, ...)
+                local handled = callback(cmd, ...)
+                if is_help_command(cmd) then print_note_help() end
+                return handled
             end)
         end
         return original_register_event(event_name, callback)
