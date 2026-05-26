@@ -329,6 +329,19 @@ local function is_descendant(node, possible_parent)
     return false
 end
 
+local function prune_empty_virtual_folders(node)
+    if not node or not node.children then return false end
+
+    for i = #node.children, 1, -1 do
+        local child = node.children[i]
+        if prune_empty_virtual_folders(child) then
+            table.remove(node.children, i)
+        end
+    end
+
+    return node.virtual == true and not node.has_gear and #node.children == 0
+end
+
 local function apply_order(parent, ref, root)
     local order = data.orders[ref]
     if not order then return end
@@ -396,6 +409,8 @@ function layout.apply(root)
         end
     end
 
+    rebuild(root, nil)
+    prune_empty_virtual_folders(root)
     rebuild(root, nil)
     walk(root, function(node)
         apply_order(node, node_ref(node, root), root)
