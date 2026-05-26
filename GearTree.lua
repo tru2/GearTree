@@ -4,7 +4,7 @@
 
 _addon.name    = 'GearTree'
 _addon.author  = 'Tru + Codex'
-_addon.version = '0.2.14'
+_addon.version = '0.3.0'
 _addon.commands = { 'geartree', 'gt' }
 
 require('logger')
