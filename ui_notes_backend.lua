@@ -15,13 +15,33 @@ local CHAT = {
     detail = 160,
 }
 
+local NOTE_HEADER_COLOR = { 245, 210, 120 }
+local NOTE_TEXT_COLOR = { 220, 220, 215 }
+local NOTE_DIM_COLOR = { 132, 138, 145 }
+local NOTE_WRAP_COLS = 52
+
 local original_build_set_info = semantics.build_set_info
+local original_show_preview = backend.show_preview
 
 local function gt_chat(color, message)
     if windower and windower.add_to_chat then
         windower.add_to_chat(color, '[GearTree] ' .. message)
     end
 end
+
+local function find_upvalue(fn, target_name)
+    if type(debug) ~= 'table' or type(debug.getupvalue) ~= 'function' then return nil end
+    if type(fn) ~= 'function' then return nil end
+
+    for i = 1, 80 do
+        local name, value = debug.getupvalue(fn, i)
+        if not name then break end
+        if name == target_name then return value end
+    end
+    return nil
+end
+
+local backend_state = find_upvalue(original_show_preview, 'state')
 
 local function selected_path()
     local node = backend.get_selected_node and backend.get_selected_node() or nil
@@ -34,25 +54,19 @@ local function selected_path()
     return tree.path_string(node), nil
 end
 
+local function note_for_node(node)
+    if not node or node.virtual or not node.path then return '' end
+    local path = tree.path_string(node)
+    if path == '' then return '' end
+    return notes.get(path) or ''
+end
+
 local function add_note_to_info(node, info)
     info = info or {}
-    local path = node and node.path and not node.virtual and tree.path_string(node) or nil
-    local note = path and notes.get(path) or ''
 
-    if note ~= '' then
-        info.user_note = note
-
-        -- Keep the generated summary intact. Notes are appended after the
-        -- normal explanation with a clear section-style header instead of
-        -- replacing or leading the top summary paragraph.
-        local existing = tostring(info.plain_english or ''):gsub('%s+$', '')
-        local note_block = '== Personal Note ==\n' .. note
-        if existing ~= '' then
-            info.plain_english = existing .. '\n\n' .. note_block
-        else
-            info.plain_english = note_block
-        end
-    end
+    -- Keep notes as metadata only. Do not inject them into plain_english,
+    -- because that makes the note look like it overwrote the generated summary.
+    info.user_note = note_for_node(node)
 
     return info
 end
@@ -61,8 +75,84 @@ semantics.build_set_info = function(node)
     return add_note_to_info(node, original_build_set_info(node) or {})
 end
 
+local function append_line(out, text, color)
+    out[#out + 1] = { text = tostring(text or ''), color = color }
+end
+
+local function append_wrapped(out, text, color)
+    text = tostring(text or ''):gsub('\r\n', '\n'):gsub('\r', '\n')
+
+    local function append_one(raw)
+        raw = tostring(raw or '')
+        if raw == '' then
+            append_line(out, '', color)
+            return
+        end
+
+        local line = raw
+        while #line > NOTE_WRAP_COLS do
+            local cut = nil
+            for i = NOTE_WRAP_COLS, 12, -1 do
+                local ch = line:sub(i, i)
+                if ch == ' ' or ch == ',' or ch == '/' then
+                    cut = i
+                    break
+                end
+            end
+            cut = cut or NOTE_WRAP_COLS
+            append_line(out, line:sub(1, cut):gsub('%s+$', ''), color)
+            line = line:sub(cut + 1):gsub('^%s+', '')
+        end
+        append_line(out, line, color)
+    end
+
+    if text:sub(-1) ~= '\n' then text = text .. '\n' end
+    for raw in text:gmatch('(.-)\n') do
+        append_one(raw)
+    end
+end
+
+local function append_notes_section(node)
+    local state = backend_state
+    if not state or type(state.preview_cards) ~= 'table' then return end
+    local summary = state.preview_cards.summary
+    if type(summary) ~= 'table' then return end
+
+    append_line(summary, '', NOTE_TEXT_COLOR)
+    append_line(summary, '== Notes ==', NOTE_HEADER_COLOR)
+
+    local note = note_for_node(node)
+    if note == '' then
+        append_wrapped(summary, 'No note saved. Use //gt note <text> to add one.', NOTE_DIM_COLOR)
+    else
+        append_wrapped(summary, note, NOTE_TEXT_COLOR)
+    end
+
+    if state.preview_card == 'summary' or state.preview_card == nil then
+        state.preview_lines = summary
+    end
+end
+
+backend.show_preview = function(node)
+    local result = original_show_preview(node)
+    append_notes_section(node)
+
+    -- original_show_preview renders before the note section exists. Refresh once
+    -- after appending so the overlay redraws with the finished Summary card.
+    if backend_state and backend_state.visible and backend.refresh then
+        backend.refresh()
+    end
+
+    return result
+end
+
 local function refresh_preview()
-    if backend.refresh then backend.refresh() end
+    local node = backend.get_selected_node and backend.get_selected_node() or nil
+    if node and backend.show_preview then
+        backend.show_preview(node)
+    elseif backend.refresh then
+        backend.refresh()
+    end
 end
 
 local function handle_note_command(args)
