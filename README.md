@@ -1,132 +1,333 @@
 # GearTree
 
-A Windower addon that gives you a clickable, expandable tree of every gear set
-in your Gearswap user file. Left-click a set to equip it. Right-click to see
-what's in it. You can also equip a set from GearTree, change gear in game, then
-save the changed slots back into that set.
+GearTree is a Windower addon for FFXI that turns your currently loaded GearSwap Lua file into a clickable gear-set browser.
 
-Sets are shown in the same order they first appear in your Lua file. You can
-switch between the raw Lua tree and an organized tree that groups sets into
-friendlier folders. The preview pane always shows the original Lua path plus the
-source file and line number for each set.
+It lets you:
+
+- Browse GearSwap sets in a readable tree.
+- Use an organized view that groups common GearSwap patterns into friendly folders.
+- Equip sets directly from the UI.
+- Preview what a set does, where it comes from, and what gear it defines.
+- Compare the selected set against your currently equipped gear.
+- Save changed equipped slots back into the highlighted Lua set.
+- Add personal notes to sets and folders without editing your GearSwap Lua.
+
+GearTree is meant to help players understand, test, clean up, and maintain big GearSwap files without digging through hundreds or thousands of Lua lines every time.
+
+---
 
 ## Install
 
-1. Copy the whole `GearTree` folder into `Windower4/addons/`.
-2. In FFXI: `//lua load GearTree`
-3. The window opens at position (100, 100). Drag the title bar to move it.
+1. Copy the whole `GearTree` folder into:
 
-If your gear file isn't auto-detected, point at it explicitly:
+   ```text
+   Windower4/addons/GearTree/
+   ```
+
+2. In game, load the addon:
+
+   ```lua
+   //lua load GearTree
+   ```
+
+3. GearTree will try to auto-detect the current GearSwap file for your character/job.
+
+If your gear file is not auto-detected, load it manually:
+
+```lua
+//gt load D:\Windower4\addons\GearSwap\data\Character\Character_Job_Gear.lua
 ```
-//gt load D:\Windower4\addons\GearSwap\data\Mogwa\Mogwa_Thf_Gear.lua
+
+---
+
+## Basic use
+
+- **Left-click** a row to expand/collapse it. If the row is a gear set, it also equips that set.
+- **Right-click** a row to preview set info, source/path details, and gear.
+- **Mouse wheel** over the window to scroll.
+- **Drag the title bar** to move the window. Position is saved.
+- **Esc** hides the window.
+- **End** equips the highlighted set.
+
+When GearTree is visible:
+
+```text
+Up / Down   Move through the tree or scroll the active preview tab
+Right       Expand folder / move preview tab right
+Left        Collapse/back / move preview tab left
+End         Equip highlighted set
+Esc         Hide GearTree
 ```
 
-## Controls
-
-- **Left-click** a row: expand/collapse if it has children, equip if it has gear (does both if both apply).
-- **Right-click** a row: open the preview pane to see what the set is for, where it lives in Lua, and what gear it defines or overrides.
-- **Mouse wheel** over the window: scroll.
-- **Drag the title bar**: move the window. Position is saved.
+---
 
 ## Commands
 
-```
-//gt show | hide | toggle     show or hide the window
-//gt reload                   re-parse the current gear file
-//gt save                     save changed equipped slots into highlighted set
-//gt undo                     restore the backup from the last GearTree save
-//gt last                     jump back to the last saved set
-//gt find <text>              jump to a matching set, folder, or gear line
-//gt load <path>              parse a specific gear file
-//gt auto                     try to auto-detect for your current job
+```lua
+//gt show | hide | toggle
+//gt reload
+//gt save
+//gt saveslot <slot>
+//gt undo
+//gt last
+//gt open
+//gt note <text>
+//gt note
+//gt note clear
+//gt find <text>
+//gt status
+//gt edit [on|off|toggle]
+//gt load <path>
+//gt auto
 //gt mode [raw|organized|toggle]
-                              switch between Raw Lua Tree and Organized Tree
-//gt make <folder> [root]     add a virtual display folder
-//gt move <set> to <folder>   move a Lua set/folder in the display only
+//gt make <folder> [root]
+//gt move <set> to <folder>
 //gt move [set] up|down|top|bottom
-                              reorder display items without editing Lua
-//gt move here                move the last saved set into highlighted folder
-//gt rename <new>             rename highlighted virtual folder
-//gt rename <folder> to <new> rename a named virtual folder
-//gt remove [folder]          remove virtual folder only
-//gt unmove [set]             return a moved set/folder to Lua location
-//gt layout reset             return display layout to Lua order
-//gt expandall | collapseall  expand or collapse the whole tree
-//gt pos [x y]                show position, or set it explicitly
-//gt help                     command summary
+//gt move here
+//gt rename <new name>
+//gt rename <folder> to <new name>
+//gt remove [folder]
+//gt unmove [set]
+//gt layout reset
+//gt expandall | collapseall
+//gt pos [x y]
+//gt augdebug
+//gt debugslot <slot>
+//gt help
 ```
+
+### Useful commands
+
+```lua
+//gt save
+```
+
+Saves changed equipped slots back into the highlighted set. GearTree only writes slots that changed from the baseline it captured when the set was equipped.
+
+```lua
+//gt saveslot head
+```
+
+Force-saves the currently equipped item in one slot into the highlighted set.
+
+```lua
+//gt undo
+```
+
+Restores the backup from the most recent GearTree save.
+
+```lua
+//gt note Temporary set while I work toward better head/back pieces.
+```
+
+Adds a personal note to the highlighted set or folder. Notes are stored in GearTree data files, not in your GearSwap Lua.
+
+```lua
+//gt note
+```
+
+Shows the note for the highlighted set or folder in chat.
+
+```lua
+//gt note clear
+```
+
+Clears the note for the highlighted set or folder.
+
+```lua
+//gt open
+```
+
+Opens the highlighted Lua set near its source line, when possible.
+
+```lua
+//gt mode raw
+//gt mode organized
+```
+
+Switches between the raw Lua tree and the organized tree.
+
+---
+
+## Organized tree vs raw tree
+
+GearTree has two display modes:
+
+### Organized Tree
+
+The default view. GearTree groups common GearSwap patterns into friendly categories like:
+
+- Current State
+- Actions
+- Magic
+- Overlays / Modifiers
+- Reactive
+- Weapons
+- Other
+
+This does **not** change your Lua file. It is only a display layer.
+
+### Raw Lua Tree
+
+Shows sets closer to the actual Lua structure, useful for debugging or finding the exact path.
+
+Use:
+
+```lua
+//gt mode raw
+//gt mode organized
+//gt mode toggle
+```
+
+---
 
 ## Saving gear changes
 
-1. Highlight a set in GearTree and equip it from GearTree.
-2. Change gear normally in game.
-3. Run `//gt save`.
+Typical save workflow:
 
-GearTree compares your current gear against the set it equipped, then writes
-only the changed slots into the highlighted set. Augmented gear is written as
-`{ name="Item", augments={...} }`.
+1. Highlight a set in GearTree.
+2. Equip it from GearTree.
+3. Change gear normally in game.
+4. Run:
 
-After a save, GearTree prints each changed slot as `old item -> new item` so
-you can quickly spot what was written.
+   ```lua
+   //gt save
+   ```
 
-Before every successful write, GearTree creates a backup in
-`addons/GearTree/data/backups/`. After saving, it reparses the tree and runs
-`gs reload`. The saved set is remembered, marked with `*`, and can be revisited
-with `//gt last`.
+GearTree compares your current equipment against the baseline from when it equipped the set. It writes only changed slots.
 
-Editable set shapes:
+Before every successful write, GearTree creates a backup in:
 
-- `sets.foo = { ... }` updates or adds slot fields in that table.
-- `sets.foo = set_combine(base, { ... })` updates or adds fields in the
-  override table.
-- `sets.foo = set_combine(base)` appends a new override table.
-- `sets.foo = sets.bar` becomes `sets.foo = set_combine(sets.bar, { ... })`.
+```text
+Windower4/addons/GearTree/data/backups/
+```
+
+GearTree keeps the latest **5 backups per Lua file**. The most recent save can be restored with:
+
+```lua
+//gt undo
+```
+
+After saving, GearTree reparses the file and queues a GearSwap reload.
+
+---
+
+## Notes
+
+GearTree supports personal notes on both gear sets and category/folder cards.
+
+Notes appear under:
+
+```text
+== Notes ==
+```
+
+in the Summary tab.
+
+Examples:
+
+```lua
+//gt note Temporary idle set while I work toward better DT pieces.
+```
+
+```lua
+//gt note Dynamis proc/NM utility sets. Keep low damage options here.
+```
+
+Notes are stored separately from your GearSwap Lua, so they do not clutter or rewrite your source file comments.
+
+---
+
+## Augment tags
+
+GearTree uses simple augment tags in the Gear tab:
+
+```text
+[aug]
+```
+
+The Lua set explicitly lists augments for that item.
+
+```text
+[aug?]
+```
+
+The Lua set does **not** list augments, but GearTree found an augmented copy equipped or in inventory/storage.
+
+Important limitation: if your Lua only says:
+
+```lua
+right_ring="Gelatinous Ring +1"
+```
+
+then GearTree cannot know which augmented copy you intended. It can only say that an augmented copy was found. If you need exact-copy matching, put the augments in your Lua:
+
+```lua
+right_ring={ name="Gelatinous Ring +1", augments={'Path: A'} }
+```
+
+GearTree currently does **not** display augment rank/path details like `A/R15`, because Windower/extdata does not consistently expose that data in the parsed augment list.
+
+---
+
+## What GearTree will edit
+
+GearTree edits common GearSwap assignment shapes such as:
+
+```lua
+sets.foo = { ... }
+sets.foo = set_combine(base, { ... })
+sets.foo = set_combine(base)
+sets.foo = sets.bar
+```
 
 Dynamic or unsupported assignments are refused instead of rewritten.
 
-## How it works
+GearTree parses your Lua file as text. It does **not** execute your GearSwap file. That keeps the parser safer, but it also means sets built only through runtime logic may not appear.
 
-GearTree parses your Gearswap user `.lua` file as text — it does **not** execute
-it. It extracts every `sets.X.Y.Z = ...` assignment and builds a tree. Clicking
-a leaf sends `gs equip <path>` to Gearswap, which does the actual equipping
-(including resolving `set_combine()` calls and `gear.*` variables).
+---
 
-This means:
-- The addon only modifies your gear file when you explicitly run `//gt save`.
-- Saves are backed up first and only changed equipped slots are rewritten.
-- It works with any Mote-style or hand-rolled Gearswap file.
-- It handles bracket-key paths (`sets.precast.WS["Rudra's Storm"].SA`).
-- It does not run your gear file's logic, so dynamic sets defined inside
-  `if`-branches won't show up — only top-level `sets.X = ...` assignments are
-  extracted.
+## Known limitations
 
-## Known limitations (v0.2)
+- Dynamic sets built only inside runtime logic may not be detected.
+- GearTree does not fully resolve every nested `set_combine()` chain in the preview.
+- If Lua does not specify augments, GearTree cannot know which augmented copy you intended.
+- Augment rank/path display is intentionally not shown because the parsed data is inconsistent.
+- Some unusual positional tables like `sets.foo = {"item"}` may appear empty because GearSwap itself expects slot keys like `head=`, `body=`, etc.
+- The UI is rendered with Windower text objects, so exact spacing can vary by font/settings.
 
-- The background panel is rendered as a text object with spaces, so its visible
-  width is approximate. You may need to tune `width` in
-  `data/settings.xml` for your font choice.
-- Preview doesn't recursively resolve `set_combine()` chains; it shows the
-  immediate overrides plus the set(s) being combined, and adds a best-effort
-  plain-English explanation from standard GearSwap set names.
-- Sets defined like `sets.foo = {"item"}` (positional, no slot key) appear in
-  the tree but Gearswap treats them as empty. This is a quirk of those files,
-  not the addon.
+---
+
+## Release safety
+
+GearTree is designed to be conservative:
+
+- It only writes when you explicitly run a save command.
+- It creates a backup before each successful write.
+- It keeps the latest 5 backups per Lua file.
+- `//gt undo` restores the most recent GearTree save.
+- Unsupported set shapes are refused instead of guessed.
+
+Still, use normal caution: test on one job file first, and keep your GearSwap files backed up.
+
+---
 
 ## Files
 
-The editor version also includes `gear_slots.lua`, `snapshot.lua`, `writer.lua`,
-`organized_tree.lua`, and `semantics.lua` for slot names, current equipment
-snapshots, safe file edits, organized display routing, and plain-English preview
-metadata.
-
-```
+```text
 GearTree/
-├── GearTree.xml      - Windower manifest
-├── GearTree.lua      - Addon entry point
-├── parser.lua        - Lua text parser (extracts sets.* assignments)
-├── organized_tree.lua - Optional friendly tree routing
-├── semantics.lua     - Plain-English preview metadata for parsed sets
-├── tree.lua          - Tree builder, path formatting, flatten for display
-├── ui.lua            - Windower text overlay, click/drag/scroll handlers
-└── README.md         - This file
+├── GearTree.xml        - Windower manifest
+├── GearTree.lua        - Addon entry point and command handling
+├── parser.lua          - Lua text parser for sets.* assignments
+├── tree.lua            - Raw tree builder and path/equip helpers
+├── organized_tree.lua  - Friendly organized tree routing
+├── semantics.lua       - Summary/category explanations
+├── ui_adapter.lua      - UI adapter layer
+├── ui_facelift.lua     - Main text UI
+├── notes.lua           - GearTree note storage
+├── gear_slots.lua      - Slot names and canonicalization
+├── snapshot.lua        - Current equipment/inventory snapshots
+├── writer.lua          - Safe Lua file patching and backups
+├── layout.lua          - Virtual folder/reorder layout storage
+└── README.md
 ```
