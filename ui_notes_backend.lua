@@ -183,59 +183,7 @@ local function has_augments(value)
     return type(value) == 'table' and #value > 0
 end
 
-local function clean_augment_text(value)
-    local text = tostring(value or '')
-    text = text:gsub('\r', ' '):gsub('\n', ' ')
-    text = text:gsub('[_%-]+', ' ')
-    text = text:gsub('%s+', ' ')
-    text = text:gsub('^%s+', ''):gsub('%s+$', '')
-    return text
-end
-
-local function compact_path_rank(augments)
-    if type(augments) ~= 'table' then return nil end
-
-    local path
-    local rank
-    local combined_parts = {}
-
-    for _, augment in ipairs(augments) do
-        local text = clean_augment_text(augment)
-        combined_parts[#combined_parts + 1] = text
-    end
-
-    local combined = table.concat(combined_parts, ' / ')
-    local lower = combined:lower()
-
-    -- Odyssey and Unity augment tooltips commonly show as:
-    --   Type:A/Rank:15[15]/NextRP:0
-    -- Treat Type as the displayed augment path, because the game uses Type here
-    -- instead of the older Path wording.
-    path = lower:match('type%s*:%s*([a-z])')
-        or lower:match('type%s+([a-z])')
-        or lower:match('path%s*:%s*([a-z])')
-        or lower:match('path%s+([a-z])')
-        or lower:match('^%s*([a-z])%s*path')
-
-    rank = lower:match('rank%s*:%s*(%d+)')
-        or lower:match('rank%s+(%d+)')
-        or lower:match('[/%s]r%s*:%s*(%d+)')
-        or lower:match('[/%s]r%s*(%d+)')
-        or lower:match('^r%s*:%s*(%d+)$')
-        or lower:match('^r%s*(%d+)$')
-
-    if path then path = path:upper() end
-    if rank then rank = tostring(tonumber(rank) or rank) end
-
-    if path and rank then return path .. '/R' .. rank end
-    if path then return path end
-    if rank then return 'R' .. rank end
-    return nil
-end
-
-local function augment_label(kind, augments)
-    local compact = compact_path_rank(augments)
-    if compact then return '[' .. kind .. ' ' .. compact .. ']' end
+local function augment_label(kind)
     return '[' .. kind .. ']'
 end
 
@@ -286,7 +234,7 @@ local function augment_hints_for_row(row)
 
     local expected_augments = row.expected_augments or {}
     if has_augments(expected_augments) then
-        apply_augment_label_to_row(row, augment_label('aug', expected_augments))
+        apply_augment_label_to_row(row, augment_label('aug'))
         return
     end
 
@@ -298,7 +246,7 @@ local function augment_hints_for_row(row)
     end
 
     if has_augments(actual_augments) then
-        apply_augment_label_to_row(row, augment_label('aug?', actual_augments))
+        apply_augment_label_to_row(row, augment_label('aug?'))
         local reason = tostring(row.status_reason or '')
         if not reason:find('augmented copy', 1, true) then
             row.status_reason = (reason ~= '' and (reason .. ' ') or '') ..
