@@ -1,0 +1,170 @@
+GearTree Commands
+=================
+
+General
+-------
+//gt show | on
+    Show the GearTree window.
+
+//gt hide | off | close
+    Hide the GearTree window.
+
+//gt toggle
+    Toggle GearTree visibility.
+
+//gt reload | r
+    Re-parse and rebuild the currently loaded gear file.
+
+//gt status
+    Show loaded file, tree mode, selected set, unresolved refs,
+    and unsaved changes.
+
+//gt help | ?
+    Show command help.
+
+
+Loading / Tree Modes
+--------------------
+//gt auto
+    Auto-detect the current job GearSwap file.
+
+//gt load <path>
+    Load a specific GearSwap Lua file.
+
+//gt mode <raw|organized|toggle>
+//gt tree <raw|organized|toggle>
+//gt view <raw|organized|toggle>
+    Change tree display mode.
+
+//gt raw
+    Switch directly to raw Lua tree mode.
+
+//gt organized
+//gt organised
+    Switch directly to semantic/organized mode.
+
+
+Editing / Saving
+----------------
+//gt edit [on|off|toggle]
+    Enable or disable live edit mode.
+    When enabled, highlighting sets auto-equips them and tracks changes.
+
+//gt save
+    Save changed equipped slots into the currently highlighted set.
+
+//gt saveslot <slot>
+    Force-save only the currently equipped item for one slot.
+
+//gt undo
+    Restore the backup from the last GearTree save.
+
+//gt last
+    Jump back to the last saved set.
+
+
+Source / Debug
+--------------
+//gt open
+//gt source
+    Open the highlighted set in your editor near its Lua source line.
+
+//gt augdebug
+//gt debugaug
+    Print detailed augment comparison/debug information
+    for the selected gear row.
+
+//gt debugslot <slot>
+    Print expected/equipped/storage details for a specific slot.
+
+
+Search / Navigation
+-------------------
+//gt find <text>
+    Jump to a matching set, folder, or gear line.
+
+//gt up
+//gt down
+    Move tree selection up or down.
+
+//gt expand
+    Expand the selected node/folder.
+
+//gt back
+    Collapse or move back from the selected node.
+
+//gt select
+    Select the highlighted node.
+
+//gt equip
+    Equip the currently highlighted set.
+
+
+Folders / Layout
+----------------
+//gt make <folder> [root]
+    Create a virtual display folder.
+
+//gt move <set> to <folder>
+    Move a set into a virtual folder.
+
+//gt move [set] up|down|top|bottom
+    Reorder display items.
+
+//gt move here
+    Move the last saved set into the currently highlighted virtual folder.
+
+//gt rename <new>
+//gt rename <folder> to <new>
+    Rename a virtual folder.
+
+//gt remove [folder]
+    Remove a virtual folder.
+
+//gt unmove [set]
+    Return a moved set to its original Lua location/order.
+
+//gt layout reset
+    Reset all virtual folder/layout changes back to Lua defaults.
+
+
+Display
+-------
+//gt expandall
+    Expand all tree nodes.
+
+//gt collapseall
+    Collapse all tree nodes.
+
+//gt pos [x y]
+    Show or set GearTree window position.
+
+
+Keyboard Controls
+-----------------
+Up / Down
+    Navigate tree or scroll active tab.
+
+Right
+    Expand node or switch tab.
+
+Left
+    Collapse node or go back.
+
+End
+    Equip highlighted set.
+
+Esc
+    Close GearTree window.
+
+
+Mouse Controls
+--------------
+Left-click
+    Expand/select/equip rows.
+
+Right-click
+    Open preview/source/gear details.
+
+Drag title bar
+    Move window.
