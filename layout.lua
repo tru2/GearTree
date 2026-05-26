@@ -281,7 +281,7 @@ local function new_virtual_node(folder)
         child_map = {},
         assignment = nil,
         has_gear = false,
-        expanded = true,
+        expanded = false,
         virtual = true,
         virtual_id = folder.id,
     }
