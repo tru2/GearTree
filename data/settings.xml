@@ -25,10 +25,11 @@
         <tree_mode>organized</tree_mode>
     </mogly>
     <mogwa>
-        <last_set_path>sets.precast.JA.Berserk</last_set_path>
-        <last_undo_backup />
-        <last_undo_file />
-        <last_undo_set_path />
+        <edit_mode>false</edit_mode>
+        <last_set_path>sets.idle</last_set_path>
+        <last_undo_backup>C:/Program Files (x86)/Windower/addons/GearTree/data/backups/Mogwa_Thf_Gear.lua.20260525_234359.bak</last_undo_backup>
+        <last_undo_file>C:/Program Files (x86)/Windower/addons/GearSwap/data/Mogwa/Mogwa_Thf_Gear.lua</last_undo_file>
+        <last_undo_set_path>sets.idle</last_undo_set_path>
         <pos_x>500.33331298828</pos_x>
         <pos_y>35.000003814698</pos_y>
         <tree_mode>organized</tree_mode>

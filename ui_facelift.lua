@@ -822,6 +822,7 @@ end
 
 local resource_item_lookup
 local resource_item_lookup_by_abbrev
+local resource_lookup_language
 
 local function normalize_lookup_token(text)
     text = normalize_item_name(text)
@@ -864,6 +865,60 @@ local function token_prefix_score(resource_token, query_token)
     return false
 end
 
+local function current_resource_language()
+    local info = windower and windower.ffxi and windower.ffxi.get_info and windower.ffxi.get_info() or nil
+    local lang = (info and info.language) or rawget(_G, 'language') or 'english'
+    lang = tostring(lang or 'english'):lower()
+    lang = lang:gsub('%s+', '_')
+    if lang == 'en' then return 'english' end
+    if lang == 'jp' then return 'japanese' end
+    return lang ~= '' and lang or 'english'
+end
+
+local function reset_resource_lookup_cache_if_needed()
+    local lang = current_resource_language()
+    if resource_lookup_language ~= lang then
+        resource_lookup_language = lang
+        resource_item_lookup = nil
+        resource_item_lookup_by_abbrev = nil
+    end
+end
+
+local function resource_name_variants(item)
+    local lang = current_resource_language()
+    local variants = {}
+    local seen = {}
+
+    local function add(field)
+        local value = item and item[field]
+        if value == nil or value == '' then return end
+        local key = field .. '\31' .. tostring(value)
+        if seen[key] then return end
+        seen[key] = true
+        variants[#variants + 1] = {
+            field = field,
+            name = value,
+            normalized = normalize_lookup_token(value),
+            tokens = tokenize_lookup_name(value),
+        }
+    end
+
+    add(lang)
+    add(lang .. '_log')
+    if lang ~= 'english' then
+        add('english')
+        add('english_log')
+    end
+    if lang ~= 'name' then
+        add('name')
+    end
+    if lang ~= 'en' then
+        add('en')
+    end
+
+    return variants
+end
+
 local function resource_lookup_result_for_name(name)
     local raw = tostring(name or '')
     local normalized = normalize_lookup_token(raw)
@@ -872,31 +927,44 @@ local function resource_lookup_result_for_name(name)
             normalized = '',
             exact_id = nil,
             exact_name = nil,
+            exact_field = nil,
+            exact_candidates = {},
             abbreviation_candidates = {},
             matched_id = nil,
             matched_name = nil,
+            matched_field = nil,
+            matched_english = nil,
+            matched_english_log = nil,
             unresolved = true,
         }
     end
+
+    reset_resource_lookup_cache_if_needed()
 
     if not resource_item_lookup then
         resource_item_lookup = {}
         resource_item_lookup_by_abbrev = {}
         for id, item in pairs(res.items or {}) do
-            local item_name = item and (item.english or item.en or item.name)
-            if item_name then
-                local normalized = normalize_lookup_token(item_name)
-                if normalized ~= '' and resource_item_lookup[normalized] == nil then
-                    resource_item_lookup[normalized] = id
+            local variants = resource_name_variants(item)
+            for _, variant in ipairs(variants) do
+                if variant.normalized ~= '' then
+                    resource_item_lookup[variant.normalized] = resource_item_lookup[variant.normalized] or {}
+                    resource_item_lookup[variant.normalized][#resource_item_lookup[variant.normalized] + 1] = {
+                        id = id,
+                        field = variant.field,
+                        name = variant.name,
+                        normalized = variant.normalized,
+                    }
                 end
 
-                local tokens = tokenize_lookup_name(item_name)
-                if #tokens > 0 then
-                    local abbrev_key = table.concat(tokens, '\31')
+                if #variant.tokens > 0 then
+                    local abbrev_key = table.concat(variant.tokens, '\31')
                     resource_item_lookup_by_abbrev[abbrev_key] = resource_item_lookup_by_abbrev[abbrev_key] or {}
                     resource_item_lookup_by_abbrev[abbrev_key][#resource_item_lookup_by_abbrev[abbrev_key] + 1] = {
                         id = id,
-                        name = item_name,
+                        field = variant.field,
+                        name = variant.name,
+                        normalized = variant.normalized,
                     }
                 end
             end
@@ -907,19 +975,40 @@ local function resource_lookup_result_for_name(name)
         normalized = normalized,
         exact_id = nil,
         exact_name = nil,
+        exact_field = nil,
+        exact_candidates = {},
         abbreviation_candidates = {},
         matched_id = nil,
         matched_name = nil,
+        matched_field = nil,
+        matched_english = nil,
+        matched_english_log = nil,
         unresolved = false,
     }
 
-    local exact_id = resource_item_lookup[normalized]
-    if exact_id then
-        local item = res.items and res.items[exact_id]
-        result.exact_id = exact_id
-        result.exact_name = item and (item.english or item.en or item.name) or nil
-        result.matched_id = exact_id
-        result.matched_name = result.exact_name
+    local exact_matches = {}
+    local seen_exact_ids = {}
+    for _, candidate in ipairs(resource_item_lookup[normalized] or {}) do
+        if not seen_exact_ids[candidate.id] then
+            seen_exact_ids[candidate.id] = true
+            exact_matches[#exact_matches + 1] = candidate
+        end
+    end
+    if #exact_matches == 1 then
+        local match = exact_matches[1]
+        local item = res.items and res.items[match.id] or nil
+        result.exact_id = match.id
+        result.exact_name = match.name
+        result.exact_field = match.field
+        result.matched_id = match.id
+        result.matched_name = match.name
+        result.matched_field = match.field
+        result.matched_english = item and (item.english or item.en or item.name) or nil
+        result.matched_english_log = item and item.english_log or nil
+        return result
+    elseif #exact_matches > 1 then
+        result.exact_candidates = exact_matches
+        result.unresolved = true
         return result
     end
 
@@ -931,24 +1020,31 @@ local function resource_lookup_result_for_name(name)
 
     local candidates = {}
     for id, item in pairs(res.items or {}) do
-        local item_name = item and (item.english or item.en or item.name)
-        if item_name then
-            local resource_tokens = tokenize_lookup_name(item_name)
-            if #resource_tokens == #query_tokens and #resource_tokens > 0 then
+        local variants = resource_name_variants(item)
+        local matched_variant = nil
+        for _, variant in ipairs(variants) do
+            if #variant.tokens == #query_tokens and #variant.tokens > 0 then
                 local ok = true
                 for i = 1, #query_tokens do
-                    if not token_prefix_score(resource_tokens[i], query_tokens[i]) then
+                    if not token_prefix_score(variant.tokens[i], query_tokens[i]) then
                         ok = false
                         break
                     end
                 end
                 if ok then
-                    candidates[#candidates + 1] = {
-                        id = id,
-                        name = item_name,
-                    }
+                    matched_variant = variant
+                    break
                 end
             end
+        end
+        if matched_variant then
+            candidates[#candidates + 1] = {
+                id = id,
+                field = matched_variant.field,
+                name = matched_variant.name,
+                english = item and item.english or nil,
+                english_log = item and item.english_log or nil,
+            }
         end
     end
 
@@ -956,6 +1052,9 @@ local function resource_lookup_result_for_name(name)
     if #candidates == 1 then
         result.matched_id = candidates[1].id
         result.matched_name = candidates[1].name
+        result.matched_field = candidates[1].field
+        result.matched_english = candidates[1].english
+        result.matched_english_log = candidates[1].english_log
     else
         result.unresolved = true
     end
@@ -1162,9 +1261,14 @@ local function resolve_gear_spec(value)
         spec.resolved_name = lookup.matched_name
         spec.lookup_exact_id = lookup.exact_id
         spec.lookup_exact_name = lookup.exact_name
+        spec.lookup_exact_field = lookup.exact_field
+        spec.lookup_exact_candidates = lookup.exact_candidates
         spec.lookup_candidates = lookup.abbreviation_candidates
         spec.lookup_normalized = lookup.normalized
         spec.lookup_unresolved = lookup.unresolved
+        spec.lookup_matched_field = lookup.matched_field
+        spec.lookup_matched_english = lookup.matched_english
+        spec.lookup_matched_english_log = lookup.matched_english_log
         if lookup.unresolved then
             spec.unresolved = true
         end
@@ -2727,17 +2831,26 @@ function ui.debug_selected_slot(slot)
     lines[#lines + 1] = '  alias resolved from database: ' .. tostring(alias_resolved == true)
     lines[#lines + 1] = '  resolved expected name: ' .. tostring(spec.display_name or 'none')
     lines[#lines + 1] = '  normalized expected name: ' .. tostring(spec.lookup_normalized or 'none')
-    lines[#lines + 1] = '  exact lookup result: ' .. tostring(spec.lookup_exact_id or 'none') .. ' / ' .. tostring(spec.lookup_exact_name or 'none')
+    lines[#lines + 1] = '  exact lookup result: ' .. tostring(spec.lookup_exact_id or 'none') .. ' / ' .. tostring(spec.lookup_exact_name or 'none') .. ' / ' .. tostring(spec.lookup_exact_field or 'none')
+    lines[#lines + 1] = '  matched english name: ' .. tostring(spec.lookup_matched_english or 'none')
+    lines[#lines + 1] = '  matched english_log name: ' .. tostring(spec.lookup_matched_english_log or 'none')
     if spec.lookup_candidates and #spec.lookup_candidates > 0 then
         local parts = {}
         for _, candidate in ipairs(spec.lookup_candidates) do
-            parts[#parts + 1] = string.format('%s=%s', tostring(candidate.id), tostring(candidate.name))
+            parts[#parts + 1] = string.format('%s=%s [%s]', tostring(candidate.id), tostring(candidate.name), tostring(candidate.field or ''))
         end
         lines[#lines + 1] = '  abbreviation candidates: ' .. table.concat(parts, ' | ')
     else
         lines[#lines + 1] = '  abbreviation candidates: none'
     end
-    lines[#lines + 1] = '  final matched resource: ' .. tostring(spec.resolved_name or 'none') .. ' / ' .. tostring(spec.item_id or 'none')
+    if spec.lookup_exact_candidates and #spec.lookup_exact_candidates > 1 then
+        local parts = {}
+        for _, candidate in ipairs(spec.lookup_exact_candidates) do
+            parts[#parts + 1] = string.format('%s=%s [%s]', tostring(candidate.id), tostring(candidate.name), tostring(candidate.field or ''))
+        end
+        lines[#lines + 1] = '  exact candidates: ' .. table.concat(parts, ' | ')
+    end
+    lines[#lines + 1] = '  final matched resource: ' .. tostring(spec.resolved_name or 'none') .. ' / ' .. tostring(spec.item_id or 'none') .. ' / ' .. tostring(spec.lookup_matched_field or 'none')
     lines[#lines + 1] = '  resolved expected item ID: ' .. tostring(spec.item_id or 'none')
     lines[#lines + 1] = '  expected augments raw: ' .. augment_signature_text(spec.expected_augments_raw)
     lines[#lines + 1] = '  expected augments parsed: ' .. list_text(spec.expected_augments)
