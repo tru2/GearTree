@@ -66,6 +66,7 @@ local function make_item(slot, item, bag, index)
         slot = slot,
         name = name,
         id = item.id,
+        extdata = item.extdata,
         bag = bag,
         index = index,
         augments = item_augments(item),

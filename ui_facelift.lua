@@ -6,6 +6,8 @@ local semantics = require('semantics')
 local texts     = require('texts')
 local images    = require('images')
 local gear_slots = require('gear_slots')
+local res       = require('resources')
+local extdata   = require('extdata')
 
 local ui = {}
 
@@ -99,7 +101,7 @@ local state = {
     recent_saved = { path = nil, slots = {} },
     current_equipment = { path = nil, slots = {} },
     gear_reference_items = {},
-    inventory_locations = { items = {}, bags = {} },
+    inventory_locations = { items = {}, items_by_id = {}, bags = {} },
     status_text = '',
     last_saved_path = '',
     objects = {},
@@ -736,6 +738,101 @@ local function same_name(left, right)
     return normalize_item_name(left) == normalize_item_name(right)
 end
 
+local resource_item_lookup
+
+local function resource_id_for_name(name)
+    local key = normalize_item_name(name)
+    if key == '' then return nil end
+
+    if not resource_item_lookup then
+        resource_item_lookup = {}
+        for id, item in pairs(res.items or {}) do
+            local item_name = item and (item.english or item.en or item.name)
+            if item_name then
+                local normalized = normalize_item_name(item_name)
+                if normalized ~= '' and resource_item_lookup[normalized] == nil then
+                    resource_item_lookup[normalized] = id
+                end
+            end
+        end
+    end
+
+    return resource_item_lookup[key]
+end
+
+local function augment_list(value)
+    local out = {}
+    if value == nil then return out end
+
+    if type(value) == 'table' then
+        for _, augment in ipairs(value) do
+            augment = trim(augment)
+            if augment ~= '' then
+                out[#out + 1] = augment
+            end
+        end
+        return out
+    end
+
+    local text = trim(value)
+    if text == '' then return out end
+    for augment in text:gmatch('[^;]+') do
+        augment = trim(augment)
+        if augment ~= '' then
+            out[#out + 1] = augment
+        end
+    end
+    return out
+end
+
+local function same_augments(left, right)
+    local a = augment_list(left)
+    local b = augment_list(right)
+    if #a == 0 then return true end
+    if #b == 0 then return false end
+
+    local ok, matched = pcall(extdata.compare_augments, a, b)
+    if ok then
+        return matched == true
+    end
+
+    if #a ~= #b then return false end
+    local seen = {}
+    for _, augment in ipairs(b) do
+        local key = normalize_item_name(augment)
+        seen[key] = (seen[key] or 0) + 1
+    end
+    for _, augment in ipairs(a) do
+        local key = normalize_item_name(augment)
+        if not seen[key] or seen[key] == 0 then
+            return false
+        end
+        seen[key] = seen[key] - 1
+    end
+    return true
+end
+
+local function resolve_gear_spec(value)
+    local display_name, augments, augmented, unresolved = gear_display(value)
+    local spec = {
+        display_name = display_name,
+        item_id = nil,
+        augments = augment_list(augments),
+        has_augments = augmented == true or #augment_list(augments) > 0,
+        unresolved = unresolved == true,
+    }
+
+    if display_name and display_name ~= '' then
+        spec.item_id = resource_id_for_name(display_name)
+    end
+
+    if spec.item_id == nil and spec.display_name ~= nil and spec.display_name ~= '' then
+        spec.unresolved = true
+    end
+
+    return spec
+end
+
 local function bag_label(id)
     for _, bag in ipairs(state.inventory_locations.bags or {}) do
         if bag.id == id then return bag.label end
@@ -745,7 +842,11 @@ local function bag_label(id)
 end
 
 local function item_locations(name)
-    return (state.inventory_locations.items or {})[tostring(name or ''):lower()] or {}
+    return (state.inventory_locations.items or {})[normalize_item_name(name)] or {}
+end
+
+local function item_locations_by_id(item_id)
+    return (state.inventory_locations.items_by_id or {})[item_id] or {}
 end
 
 local function bag_access(id)
@@ -757,16 +858,34 @@ local function bag_access(id)
     return nil
 end
 
-local function best_location(name)
-    local locations = item_locations(name)
+local function best_location_exact(spec)
+    local locations = {}
+    if spec and spec.item_id then
+        locations = item_locations_by_id(spec.item_id)
+    elseif spec and spec.display_name then
+        locations = item_locations(spec.display_name)
+    end
+
+    local function is_exact_location(location)
+        if not location then return false end
+        if spec and spec.has_augments then
+            return same_augments(spec.augments, location.augments)
+        end
+        return true
+    end
+
     for _, location in ipairs(locations) do
-        if location.equip_ready and (location.available == true or bag_access(location.bag)) then
+        if is_exact_location(location) and location.equip_ready and (location.available == true or bag_access(location.bag)) then
             return location, false
         end
     end
-    if locations[1] then
-        return locations[1], locations[1].available == false or not bag_access(locations[1].bag)
+
+    for _, location in ipairs(locations) do
+        if is_exact_location(location) then
+            return location, location.available == false or not bag_access(location.bag)
+        end
     end
+
     return nil, false
 end
 
@@ -809,11 +928,7 @@ local function gear_line_status(item, set_path)
 
     local equipped = equipped_item_for_slot(item.slot)
     local expected = trim(item.value)
-    local expected_name, _, _, unresolved = gear_display(item.value)
-
-    if unresolved then
-        return 'UNKN', cfg.row_fg_gold
-    end
+    local spec = resolve_gear_spec(item.value)
 
     if expected == 'empty' then
         if equipped and equipped.empty then
@@ -822,17 +937,38 @@ local function gear_line_status(item, set_path)
         return 'MISS', cfg.row_fg_red
     end
 
-    if equipped and not equipped.empty and same_name(equipped.name, expected_name) then
+    if equipped and not equipped.empty and spec.item_id and equipped.id == spec.item_id and same_augments(spec.augments, equipped.augments) then
         return 'EQUIP', cfg.row_fg_green
     end
 
-    local location, unavailable = best_location(expected_name)
+    local location, unavailable = best_location_exact(spec)
     if location then
         local badge = where_badge_from_label(location.label or bag_label(location.bag))
         if unavailable then
             return badge, cfg.row_fg_dim
         end
         return badge, cfg.row_fg_green
+    end
+
+    if not spec.item_id and spec.display_name then
+        local fallback_spec = {
+            display_name = spec.display_name,
+            item_id = nil,
+            augments = spec.augments,
+            has_augments = spec.has_augments,
+        }
+        local fallback_location, fallback_unavailable = best_location_exact(fallback_spec)
+        if fallback_location then
+            local badge = where_badge_from_label(fallback_location.label or bag_label(fallback_location.bag))
+            if fallback_unavailable then
+                return badge, cfg.row_fg_dim
+            end
+            return badge, cfg.row_fg_green
+        end
+    end
+
+    if spec.item_id == nil and spec.unresolved then
+        return 'UNKN', cfg.row_fg_gold
     end
 
     return 'MISS', cfg.row_fg_red
@@ -2171,13 +2307,13 @@ function ui.set_gear_reference_items(references)
 end
 
 function ui.set_inventory_locations(locations)
-    state.inventory_locations = locations or { items = {}, bags = {} }
+    state.inventory_locations = locations or { items = {}, items_by_id = {}, bags = {} }
     refresh_preview_cards_preserving_source()
     if state.visible then render_preview() end
 end
 
 function ui.clear_inventory_locations()
-    state.inventory_locations = { items = {}, bags = {} }
+    state.inventory_locations = { items = {}, items_by_id = {}, bags = {} }
     refresh_preview_cards_preserving_source()
     if state.visible then render_preview() end
 end

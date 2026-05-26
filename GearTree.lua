@@ -19,6 +19,7 @@ local snapshot = require('snapshot')
 local writer   = require('writer')
 local gear_slots = require('gear_slots')
 local res     = require('resources')
+local extdata = require('extdata')
 
 ----------------------------------------------------------------------
 -- Settings (persisted to /addons/GearTree/data/settings.xml)
@@ -71,7 +72,7 @@ local live_change_path = nil
 local live_change_count = 0
 local live_change_signature = nil
 local next_live_check_at = 0
-local inventory_locations = { items = {}, bags = {} }
+local inventory_locations = { items = {}, items_by_id = {}, bags = {} }
 local next_inventory_scan_at = 0
 local ensure_ui
 
@@ -300,13 +301,44 @@ local STORAGE_BAGS = {
 }
 
 local function normalize_item_name(name)
-    return tostring(name or ''):lower()
+    local text = tostring(name or '')
+    text = text:gsub("%c", " ")
+    text = text:gsub("’", "'"):gsub("‘", "'")
+    text = text:gsub("\194\160", " ")
+    text = text:lower()
+    text = text:gsub('%s+', ' ')
+    text = text:gsub('^%s+', ''):gsub('%s+$', '')
+    return text
 end
 
 local function inventory_item_name(item)
     if not item or not item.id or item.id == 0 then return nil end
     local r = res.items[item.id]
     return r and (r.english or r.en or r.name) or nil
+end
+
+local function normalize_augment_text(augment)
+    if augment == nil then return nil end
+    augment = tostring(augment)
+    augment = augment:gsub('^%s+', ''):gsub('%s+$', '')
+    if augment == '' or augment == 'none' then return nil end
+    return augment
+end
+
+local function inventory_item_augments(item)
+    local ok, decoded = pcall(extdata.decode, item)
+    if not ok or not decoded or type(decoded.augments) ~= 'table' then
+        return {}
+    end
+
+    local out = {}
+    for _, augment in ipairs(decoded.augments) do
+        augment = normalize_augment_text(augment)
+        if augment then
+            out[#out + 1] = augment
+        end
+    end
+    return out
 end
 
 local function max_bag_index(bag)
@@ -352,7 +384,7 @@ local function scan_inventory_locations(force)
     end
     next_inventory_scan_at = now + INVENTORY_SCAN_INTERVAL
 
-    local locations = { items = {}, bags = {} }
+    local locations = { items = {}, items_by_id = {}, bags = {} }
 
     for _, def in ipairs(STORAGE_BAGS) do
         local info = read_bag_info(def.id)
@@ -387,13 +419,20 @@ local function scan_inventory_locations(force)
                     if name then
                         local key = normalize_item_name(name)
                         locations.items[key] = locations.items[key] or {}
-                        locations.items[key][#locations.items[key] + 1] = {
+                        local entry = {
+                            id = item.id,
+                            name = name,
+                            extdata = item.extdata,
+                            augments = inventory_item_augments(item),
                             bag = def.id,
                             index = index,
                             label = def.label,
                             equip_ready = def.equip_ready,
                             available = available,
                         }
+                        locations.items[key][#locations.items[key] + 1] = entry
+                        locations.items_by_id[item.id] = locations.items_by_id[item.id] or {}
+                        locations.items_by_id[item.id][#locations.items_by_id[item.id] + 1] = entry
                     end
                 end
             end
@@ -764,7 +803,7 @@ local function clear_current_equipment()
 end
 
 local function clear_inventory_locations()
-    inventory_locations = { items = {}, bags = {} }
+    inventory_locations = { items = {}, items_by_id = {}, bags = {} }
     next_inventory_scan_at = 0
     if ui.clear_inventory_locations then
         ui.clear_inventory_locations()
