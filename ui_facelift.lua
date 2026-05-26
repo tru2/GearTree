@@ -775,18 +775,18 @@ local function gear_display(value)
     if reference and state.gear_reference_items[reference] then
         local resolved = state.gear_reference_items[reference]
         if type(resolved) == 'table' then
-            return resolved.name or raw, resolved.augments, resolved.augmented == true, false
+            return resolved.name or raw, resolved.augments, resolved.augmented == true, false, reference
         end
-        return resolved, nil, false, false
+        return resolved, nil, false, false, reference
     end
 
     local name = raw:match('name%s*=%s*"([^"]+)"') or raw:match("name%s*=%s*'([^']+)'")
     if name then
         local augments = extract_augments(raw)
-        return name, augments, type(augments) == 'table' and #augments > 0, false
+        return name, augments, type(augments) == 'table' and #augments > 0, false, reference
     end
 
-    return strip_outer_quotes(raw), nil, false, reference ~= nil
+    return strip_outer_quotes(raw), nil, false, reference ~= nil, reference
 end
 
 local function comparable_gear_value(value)
@@ -1241,9 +1241,8 @@ local function same_augments(left, right)
 end
 
 local function resolve_gear_spec(value)
-    local display_name, augments, augmented, unresolved = gear_display(value)
+    local display_name, augments, augmented, unresolved, reference = gear_display(value)
     local aug_list = augment_list(augments)
-    local lookup = display_name and resource_lookup_result_for_name(display_name) or nil
     local spec = {
         display_name = display_name,
         item_id = nil,
@@ -1253,9 +1252,19 @@ local function resolve_gear_spec(value)
         expected_augments_raw = augments,
         has_augments = augmented == true or #aug_list > 0,
         unresolved = unresolved == true,
-        lookup = lookup,
+        lookup = nil,
+        unresolved_ref = nil,
+        gear_reference = reference,
     }
 
+    if reference and not state.gear_reference_items[reference] then
+        spec.unresolved_ref = reference
+        spec.unresolved = true
+        return spec
+    end
+
+    local lookup = display_name and resource_lookup_result_for_name(display_name) or nil
+    spec.lookup = lookup
     if lookup then
         spec.item_id = lookup.matched_id
         spec.resolved_name = lookup.matched_name
@@ -1272,10 +1281,6 @@ local function resolve_gear_spec(value)
         if lookup.unresolved then
             spec.unresolved = true
         end
-    end
-
-    if spec.item_id == nil and spec.display_name ~= nil and spec.display_name ~= '' then
-        spec.unresolved = true
     end
 
     return spec
@@ -1307,6 +1312,9 @@ local function bag_access(id)
 end
 
 local function best_location_exact(spec)
+    if spec and spec.unresolved_ref then
+        return nil, false
+    end
     local locations = {}
     if spec and spec.item_id then
         locations = item_locations_by_id(spec.item_id)
@@ -1384,13 +1392,14 @@ local function gear_row_status(item, set_path)
         augment_match = false,
     }
 
-    if not item or state.current_equipment.path ~= set_path then
+    if not item then
         state_out.status = 'UNKN'
         state_out.badge = 'UNKN'
         state_out.color = cfg.row_fg_gold
-        state_out.reason = 'Current equipment snapshot is not for this set.'
+        state_out.reason = 'No gear row is available.'
         return state_out
     end
+
     if not comparable_gear_value(item.value) then
         state_out.status = 'UNKN'
         state_out.badge = 'UNKN'
@@ -1412,10 +1421,18 @@ local function gear_row_status(item, set_path)
     state_out.expected_item_id = spec.item_id
     state_out.equipped_item_id = (equipped and not equipped.empty) and equipped.id or nil
 
+    if spec.unresolved_ref then
+        state_out.status = 'BADREF'
+        state_out.badge = 'BADREF'
+        state_out.color = cfg.row_fg_gold
+        state_out.reason = 'Unresolved gear reference: ' .. tostring(spec.unresolved_ref)
+        return state_out
+    end
+
     if expected == 'empty' then
         if equipped and equipped.empty then
             state_out.status = 'EQUIP'
-            state_out.badge = 'EQUIP'
+            state_out.badge = ''
             state_out.color = cfg.row_fg_green
             state_out.reason = 'Slot is empty as expected.'
         else
@@ -1437,50 +1454,38 @@ local function gear_row_status(item, set_path)
     if has_equipped and id_match then
         if not spec.has_augments then
             state_out.status = 'EQUIP'
-            state_out.badge = 'EQUIP'
+            state_out.badge = where_badge_from_label(bag_label(equipped.bag))
             state_out.color = cfg.row_fg_green
             state_out.reason = 'Equipped item ID matches and no augments are required.'
             return state_out
         end
 
-        if equipped.augments_available == false then
-            state_out.status = 'AUGUNVERIFIED'
-            state_out.badge = 'AUG?'
-            state_out.color = cfg.row_fg_gold
-            state_out.reason = 'Equipped item ID matches, but augment values are unavailable.'
-            return state_out
+        if equipped.augments_available ~= false then
+            local augment_match = same_augments(spec.augments, equipped.augments)
+            state_out.augment_match = augment_match == true
+            if augment_match then
+                state_out.status = 'EQUIP'
+                state_out.badge = where_badge_from_label(bag_label(equipped.bag))
+                state_out.color = cfg.row_fg_green
+                state_out.reason = 'Equipped item ID and augments match exactly.'
+                return state_out
+            end
         end
-
-        local augment_match = same_augments(spec.augments, equipped.augments)
-        state_out.augment_match = augment_match == true
-        if augment_match then
-            state_out.status = 'EQUIP'
-            state_out.badge = 'EQUIP'
-            state_out.color = cfg.row_fg_green
-            state_out.reason = 'Equipped item ID and augments match exactly.'
-        else
-            state_out.status = 'AUGMISMATCH'
-            state_out.badge = 'AUG!'
-            state_out.color = cfg.row_fg_violet
-            state_out.reason = 'Equipped item ID matches, but augments do not.'
-        end
-        return state_out
     end
 
     local location, unavailable = best_location_exact(spec)
     if location then
         local badge = where_badge_from_label(location.label or bag_label(location.bag))
-        state_out.status = badge
+        state_out.status = 'FOUND'
         state_out.badge = badge
-        state_out.color = unavailable and cfg.row_fg_dim or cfg.row_fg_green
-        state_out.reason = unavailable and ('Exact item exists only in unavailable storage: ' .. tostring(location.label or bag_label(location.bag)) .. '.')
-            or ('Exact item exists in ' .. tostring(location.label or bag_label(location.bag)) .. '.')
+        state_out.color = cfg.row_fg_dim
+        state_out.reason = 'Exact item found in ' .. tostring(location.label or bag_label(location.bag)) .. '.'
         return state_out
     end
 
     if spec.item_id == nil and spec.unresolved then
-        state_out.status = 'UNKN'
-        state_out.badge = 'UNKN'
+        state_out.status = spec.unresolved_ref and 'BADREF' or 'UNRES'
+        state_out.badge = spec.unresolved_ref and 'BADREF' or 'UNRES'
         state_out.color = cfg.row_fg_gold
         state_out.reason = 'Could not resolve the Lua value to an item ID.'
         return state_out
@@ -1489,11 +1494,8 @@ local function gear_row_status(item, set_path)
     state_out.status = 'MISS'
     state_out.badge = 'MISS'
     state_out.color = cfg.row_fg_red
-    if has_equipped and id_match then
-        state_out.reason = 'Item ID matched, but augment comparison failed before an exact copy could be confirmed.'
-    else
-        state_out.reason = 'No matching equipped item or exact storage copy was found.'
-    end
+    state_out.reason = has_equipped and id_match and 'Item ID matched, but no exact augmented copy was confirmed.'
+        or 'No matching equipped item or exact storage copy was found.'
     return state_out
 end
 
@@ -1555,7 +1557,11 @@ local function add_gear_line(out, item, width, show_augments, color, set_path, c
     local badge, badge_color, row_state = gear_line_status(item, set_path)
     local canonical_slot = gear_slots.canonical(item and item.slot) or (item and item.slot)
     local just_changed = changed_slots and canonical_slot and changed_slots[canonical_slot]
-    local row_color = badge_color or cfg.row_fg_set
+    local row_color = row_state and row_state.color or badge_color or cfg.row_fg_set
+
+    if row_state and row_state.spec and row_state.spec.has_augments then
+        name = tostring(name or '') .. ' [aug]'
+    end
 
     add_line(out,
         gear_table_cell(slot_label(item and item.slot), l.slot) .. ' ' ..
@@ -1579,9 +1585,9 @@ local function add_gear_line(out, item, width, show_augments, color, set_path, c
     out[#out].augment_match = row_state and row_state.augment_match or false
 
     if badge and badge ~= '' then
-        out[#out].aug_tag = truncate(badge, l.where)
+        out[#out].aug_tag = truncate(row_state and row_state.badge or badge, l.where)
         out[#out].aug_tag_col = l.where_col
-        out[#out].aug_tag_color = badge_color or cfg.row_fg_gold
+        out[#out].aug_tag_color = row_state and row_state.color or badge_color or cfg.row_fg_gold
     end
 end
 
@@ -2829,6 +2835,10 @@ function ui.debug_selected_slot(slot)
     lines[#lines + 1] = '  raw slot value: ' .. raw_slot_value
     lines[#lines + 1] = '  resolved as gear.* alias: ' .. tostring(alias_key ~= nil)
     lines[#lines + 1] = '  alias resolved from database: ' .. tostring(alias_resolved == true)
+    if spec.unresolved_ref then
+        lines[#lines + 1] = '  unresolved gear reference: ' .. tostring(spec.unresolved_ref)
+        lines[#lines + 1] = '  lookup skipped: true'
+    end
     lines[#lines + 1] = '  resolved expected name: ' .. tostring(spec.display_name or 'none')
     lines[#lines + 1] = '  normalized expected name: ' .. tostring(spec.lookup_normalized or 'none')
     lines[#lines + 1] = '  exact lookup result: ' .. tostring(spec.lookup_exact_id or 'none') .. ' / ' .. tostring(spec.lookup_exact_name or 'none') .. ' / ' .. tostring(spec.lookup_exact_field or 'none')

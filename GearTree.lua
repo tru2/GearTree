@@ -74,6 +74,7 @@ local live_change_signature = nil
 local next_live_check_at = 0
 local inventory_locations = { items = {}, items_by_id = {}, bags = {} }
 local next_inventory_scan_at = 0
+local load_file
 local ensure_ui
 
 -- Keyboard controls are only bound while GearTree is visible.
@@ -888,6 +889,33 @@ local function changed_slot_names(changes)
     return slots
 end
 
+local function gear_reference_key(value)
+    local raw = tostring(value or ''):gsub('^%s+', ''):gsub('%s+$', '')
+    return raw:match('^(gear%.[%a_][%w_]*)$')
+end
+
+local function unresolved_alias_replacements(node, changes)
+    local notes = {}
+    local slots = node and node.assignment and node.assignment.rhs and node.assignment.rhs.slots or {}
+
+    for _, slot in ipairs(gear_slots.ordered_changes(changes or {})) do
+        local raw_value = slots[slot]
+        local ref = gear_reference_key(raw_value)
+        if ref and not current_gear_references[ref] then
+            local item = changes and changes[slot] or nil
+            local item_name = (item and item.name) or snapshot.describe_item(item)
+            notes[#notes + 1] = string.format(
+                '%s: unresolved alias %s replaced inline with %s',
+                slot,
+                ref,
+                tostring(item_name or 'unknown')
+            )
+        end
+    end
+
+    return notes
+end
+
 local function publish_changes(path, baseline, changes, count)
     live_changes = copy_changes(changes)
     live_change_path = path
@@ -1051,17 +1079,42 @@ local function stop_edit_tracking()
     clear_inventory_locations()
 end
 
-local function show_save_feedback(path, changes, baseline, result)
+local function show_save_feedback(path, changes, baseline, result, alias_notes, extra_lines)
     gt_chat(CHAT.success, 'Saved ' .. path)
     for _, slot in ipairs(gear_slots.ordered_changes(changes)) do
         local before = snapshot.describe_item(baseline and baseline[slot])
         local after = snapshot.describe_item(changes[slot])
         gt_chat(CHAT.detail, '  ' .. slot .. ': ' .. before .. ' -> ' .. after)
     end
+    for _, note in ipairs(alias_notes or {}) do
+        gt_chat(CHAT.detail, '  ' .. note)
+    end
+    for _, line in ipairs(extra_lines or {}) do
+        gt_chat(CHAT.detail, '  ' .. line)
+    end
     if result and result.backup then
         gt_chat(CHAT.detail, 'Backup created: ' .. result.backup)
     end
     gt_chat(CHAT.info, 'GearSwap reload queued.')
+end
+
+local function finish_save(node, path, baseline, current, changes, result, alias_notes, extra_lines)
+    local saved_slots = changed_slot_names(changes)
+    remember_last_saved_set(path)
+    if ui.set_recent_saved_slots then
+        ui.set_recent_saved_slots(path, saved_slots)
+    end
+    load_file(current_file, true)
+    baselines[path] = current
+    publish_current_equipment(path, current)
+    publish_changes(path, current, {}, 0)
+    if ui.set_recent_saved_slots then
+        ui.set_recent_saved_slots(path, saved_slots)
+    end
+    remember_undo_backup(current_file, path, result)
+    show_save_feedback(path, changes, baseline, result, alias_notes, extra_lines)
+    windower.send_command('gs reload')
+    re_equip_after_gearswap_reload(node, tree.equip_command(node))
 end
 
 local function remember_undo_backup(file_path, set_path, result)
@@ -1072,7 +1125,7 @@ local function remember_undo_backup(file_path, set_path, result)
     settings:save()
 end
 
-local function load_file(path, keep_baselines)
+load_file = function(path, keep_baselines)
     if not path then
         log('No gear file specified or detected. Use `//gt load <path>` to set one.')
         return false
@@ -1181,7 +1234,6 @@ local function save_selected_set()
     end
 
     local path = tree.path_string(node)
-    local equip_cmd = tree.equip_command(node)
     local baseline = baselines[path]
     if not baseline then
         gt_chat(CHAT.warn, 'Equip this set from GearTree first, then change gear and run //gt save.')
@@ -1205,6 +1257,8 @@ local function save_selected_set()
         return
     end
 
+    local alias_notes = unresolved_alias_replacements(node, changes)
+
     local result, save_err = writer.save(current_file, node.assignment, changes)
     if not result then
         gt_chat(CHAT.error, 'Save failed: ' .. (save_err or 'unknown error'))
@@ -1219,22 +1273,62 @@ local function save_selected_set()
         return
     end
 
-    local saved_slots = changed_slot_names(changes)
-    remember_last_saved_set(path)
-    if ui.set_recent_saved_slots then
-        ui.set_recent_saved_slots(path, saved_slots)
+    finish_save(node, path, baseline, current, changes, result, alias_notes, nil)
+end
+
+local function handle_saveslot_command(args)
+    if not ensure_ui() then return end
+
+    if not current_file then
+        gt_chat(CHAT.warn, 'No gear file is loaded. Use //gt auto or //gt load <path> first.')
+        return
     end
-    load_file(current_file, true)
-    baselines[path] = current
+
+    local slot = tostring(args and args[1] or ''):gsub('^%s+', ''):gsub('%s+$', '')
+    if slot == '' then
+        gt_chat(CHAT.warn, 'Usage: //gt saveslot <slot>')
+        return
+    end
+
+    local node = ui.get_selected_node()
+    if not node or not node.has_gear then
+        gt_chat(CHAT.warn, 'Highlight a gear set first, then run //gt saveslot.')
+        return
+    end
+
+    local canonical = gear_slots.canonical(slot)
+    if not canonical then
+        gt_chat(CHAT.warn, 'Unknown gear slot: ' .. slot)
+        return
+    end
+
+    local current, capture_err = snapshot.capture()
+    if not current then
+        gt_chat(CHAT.error, 'Could not read current equipment: ' .. (capture_err or 'unknown error'))
+        return
+    end
+
+    local path = tree.path_string(node)
     publish_current_equipment(path, current)
-    publish_changes(path, current, {}, 0)
-    if ui.set_recent_saved_slots then
-        ui.set_recent_saved_slots(path, saved_slots)
+
+    local item = current[canonical]
+    if not item or item.empty then
+        gt_chat(CHAT.warn, 'No equipped item found in ' .. canonical .. '.')
+        return
     end
-    remember_undo_backup(current_file, path, result)
-    show_save_feedback(path, changes, baseline, result)
-    windower.send_command('gs reload')
-    re_equip_after_gearswap_reload(node, equip_cmd)
+
+    local changes = {}
+    changes[canonical] = item
+
+    local result, save_err = writer.save(current_file, node.assignment, changes)
+    if not result then
+        gt_chat(CHAT.error, 'Save failed: ' .. (save_err or 'unknown error'))
+        return
+    end
+
+    local alias_notes = unresolved_alias_replacements(node, changes)
+    local forced_note = string.format('%s forced saved -> %s', canonical, tostring(item.name or snapshot.describe_item(item)))
+    finish_save(node, path, baselines[path], current, changes, result, alias_notes, { forced_note })
 end
 
 local function undo_last_save()
@@ -1283,11 +1377,6 @@ function ensure_ui()
     end
     if not load_file(f) then return false end
     return true
-end
-
-local function gear_reference_key(value)
-    local raw = tostring(value or ''):gsub('^%s+', ''):gsub('%s+$', '')
-    return raw:match('^(gear%.[%a_][%w_]*)$')
 end
 
 local function unresolved_gear_references()
@@ -1937,6 +2026,8 @@ windower.register_event('addon command', function(cmd, ...)
     elseif cmd == 'save' then
         if not ensure_ui() then return end
         save_selected_set()
+    elseif cmd == 'saveslot' then
+        handle_saveslot_command(args)
     elseif cmd == 'undo' then
         undo_last_save()
     elseif cmd == 'last' then
@@ -2029,6 +2120,7 @@ windower.register_event('addon command', function(cmd, ...)
         log('  //gt show | hide | toggle')
         log('  //gt reload          - re-parse the current file')
         log('  //gt save            - save changed equipped slots into highlighted set')
+        log('  //gt saveslot <slot> - force-save the equipped item in one slot')
         log('  //gt undo            - restore the backup from the last GearTree save')
         log('  //gt last            - jump back to the last saved set')
         log('  //gt open            - open highlighted set source near its Lua line')
