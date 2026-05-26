@@ -373,6 +373,22 @@ local function has_direct_gear_slots(assignment)
     return false
 end
 
+local function prune_empty_folders(node)
+    if not node or not node.children then return false end
+
+    for i = #node.children, 1, -1 do
+        local child = node.children[i]
+        if prune_empty_folders(child) then
+            table.remove(node.children, i)
+            if node.child_map then
+                node.child_map[child.key] = nil
+            end
+        end
+    end
+
+    return node.organized == true and not node.has_gear and #node.children == 0
+end
+
 function organized_tree.build_organized_tree(assignments)
     reset_order()
     local root = new_node('Gear Sets', { 'sets' })
@@ -386,6 +402,7 @@ function organized_tree.build_organized_tree(assignments)
             add_leaf(parent, organized_tree.leaf_label(assignment), assignment)
         end
     end
+    prune_empty_folders(root)
     apply_folder_order(root)
     return root
 end
