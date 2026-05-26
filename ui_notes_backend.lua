@@ -197,25 +197,32 @@ local function compact_path_rank(augments)
 
     local path
     local rank
+    local combined_parts = {}
 
     for _, augment in ipairs(augments) do
         local text = clean_augment_text(augment)
-        local lower = text:lower()
-
-        if not path then
-            path = lower:match('path%s*[: ]?%s*([a-z])')
-                or lower:match('^%s*([a-z])%s*path')
-        end
-
-        if not rank then
-            if lower:find('rank', 1, true) then
-                rank = lower:match('rank%s*[: ]?%s*(%d+)') or lower:match('(%d+)')
-            else
-                rank = lower:match('^%s*r%s*[: ]?%s*(%d+)%s*$')
-                    or lower:match('^%s*r(%d+)%s*$')
-            end
-        end
+        combined_parts[#combined_parts + 1] = text
     end
+
+    local combined = table.concat(combined_parts, ' / ')
+    local lower = combined:lower()
+
+    -- Odyssey and Unity augment tooltips commonly show as:
+    --   Type:A/Rank:15[15]/NextRP:0
+    -- Treat Type as the displayed augment path, because the game uses Type here
+    -- instead of the older Path wording.
+    path = lower:match('type%s*:%s*([a-z])')
+        or lower:match('type%s+([a-z])')
+        or lower:match('path%s*:%s*([a-z])')
+        or lower:match('path%s+([a-z])')
+        or lower:match('^%s*([a-z])%s*path')
+
+    rank = lower:match('rank%s*:%s*(%d+)')
+        or lower:match('rank%s+(%d+)')
+        or lower:match('[/%s]r%s*:%s*(%d+)')
+        or lower:match('[/%s]r%s*(%d+)')
+        or lower:match('^r%s*:%s*(%d+)$')
+        or lower:match('^r%s*(%d+)$')
 
     if path then path = path:upper() end
     if rank then rank = tostring(tonumber(rank) or rank) end
