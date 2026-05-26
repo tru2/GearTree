@@ -23,7 +23,9 @@ local function new_node(key, path)
         child_map = {},
         assignment = nil,
         has_gear = false,
-        -- Folders start collapsed by default so the organized view opens clean.\n        -- Users can expand only the sections they need.\n        expanded = false,
+        -- Folders start collapsed by default so the organized view opens clean.
+        -- Users can expand only the sections they need.
+        expanded = false,
         organized = true,
         order_index = next_order,
     }
@@ -360,16 +362,29 @@ local function add_leaf(parent, label, assignment)
     return leaf
 end
 
+local function is_empty_plain_table_assignment(assignment)
+    local rhs = assignment and assignment.rhs
+    if not rhs or rhs.kind ~= 'table' then return false end
+
+    for _ in pairs(rhs.slots or {}) do
+        return false
+    end
+
+    return true
+end
+
 function organized_tree.build_organized_tree(assignments)
     reset_order()
     local root = new_node('Gear Sets', { 'sets' })
     for _, assignment in ipairs(assignments or {}) do
-        local parent = root
-        local route_parts = organized_tree.get_organized_route(assignment)
-        for _, folder in ipairs(route_parts) do
-            parent = ensure_folder(parent, folder)
+        if not is_empty_plain_table_assignment(assignment) then
+            local parent = root
+            local route_parts = organized_tree.get_organized_route(assignment)
+            for _, folder in ipairs(route_parts) do
+                parent = ensure_folder(parent, folder)
+            end
+            add_leaf(parent, organized_tree.leaf_label(assignment), assignment)
         end
-        add_leaf(parent, organized_tree.leaf_label(assignment), assignment)
     end
     apply_folder_order(root)
     return root
