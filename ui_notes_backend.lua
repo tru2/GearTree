@@ -35,19 +35,24 @@ local function is_note_command(cmd)
     return cmd == 'note' or cmd == 'notes'
 end
 
-local function find_upvalue(fn, target_name)
-    if type(debug) ~= 'table' or type(debug.getupvalue) ~= 'function' then return nil end
-    if type(fn) ~= 'function' then return nil end
+local function can_patch_upvalues()
+    return type(debug) == 'table'
+        and type(debug.getupvalue) == 'function'
+        and type(debug.setupvalue) == 'function'
+end
 
-    for i = 1, 80 do
+local function find_upvalue_holder(fn, target_name)
+    if not can_patch_upvalues() or type(fn) ~= 'function' then return nil end
+
+    for i = 1, 100 do
         local name, value = debug.getupvalue(fn, i)
         if not name then break end
-        if name == target_name then return value end
+        if name == target_name then
+            return { owner = fn, index = i, value = value }
+        end
     end
     return nil
 end
-
-local backend_state = find_upvalue(original_show_preview, 'state')
 
 local function selected_path()
     local node = backend.get_selected_node and backend.get_selected_node() or nil
@@ -116,13 +121,10 @@ local function append_wrapped(out, text, color)
     end
 end
 
-local function append_notes_section(node)
-    local state = backend_state
-    if not state or type(state.preview_cards) ~= 'table' then return end
+local function append_notes_section_to_cards(cards, node)
+    if type(cards) ~= 'table' or type(cards.summary) ~= 'table' then return cards end
 
-    local summary = state.preview_cards.summary
-    if type(summary) ~= 'table' then return end
-
+    local summary = cards.summary
     append_line(summary, '', NOTE_TEXT_COLOR)
     append_line(summary, '== Notes ==', NOTE_HEADER_COLOR)
 
@@ -133,23 +135,34 @@ local function append_notes_section(node)
         append_wrapped(summary, note, NOTE_TEXT_COLOR)
     end
 
-    if state.preview_card == 'summary' or state.preview_card == nil then
-        state.preview_lines = summary
-    end
-end
-
-backend.show_preview = function(node)
-    local result = original_show_preview(node)
-    append_notes_section(node)
-
-    -- original_show_preview renders before the note section exists. Refresh once
-    -- after appending so the overlay redraws with the finished Summary card.
-    if backend_state and backend_state.visible and backend.refresh then
-        backend.refresh()
+    -- Category/summary-only cards share the same table across tabs. Normal gear
+    -- sets only need the Summary card changed.
+    if cards.summary_only then
+        cards.gear = summary
+        cards.changes = summary
+        cards.evidence = summary
     end
 
-    return result
+    return cards
 end
+
+local function patch_preview_builder()
+    local holder = find_upvalue_holder(original_show_preview, 'build_preview_cards')
+    if not holder or type(holder.value) ~= 'function' then
+        gt_chat(CHAT.warn, 'Notes display hook was not installed; build_preview_cards not found.')
+        return false
+    end
+
+    local original_build_preview_cards = holder.value
+    local function build_preview_cards_with_notes(node)
+        return append_notes_section_to_cards(original_build_preview_cards(node), node)
+    end
+
+    debug.setupvalue(holder.owner, holder.index, build_preview_cards_with_notes)
+    return true
+end
+
+patch_preview_builder()
 
 local function refresh_preview()
     local node = backend.get_selected_node and backend.get_selected_node() or nil
