@@ -41,12 +41,16 @@ local function add_note_to_info(node, info)
 
     if note ~= '' then
         info.user_note = note
-        local existing = tostring(info.plain_english or '')
-        local note_text = 'Note: ' .. note
+
+        -- Keep the generated summary intact. Notes are appended after the
+        -- normal explanation with a clear section-style header instead of
+        -- replacing or leading the top summary paragraph.
+        local existing = tostring(info.plain_english or ''):gsub('%s+$', '')
+        local note_block = '== Personal Note ==\n' .. note
         if existing ~= '' then
-            info.plain_english = note_text .. '\n\n' .. existing
+            info.plain_english = existing .. '\n\n' .. note_block
         else
-            info.plain_english = note_text
+            info.plain_english = note_block
         end
     end
 
