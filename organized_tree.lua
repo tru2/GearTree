@@ -7,6 +7,7 @@
 -- real Lua set path.
 
 local organized_tree = {}
+local semantics = require('semantics')
 local next_order = 0
 
 local function reset_order()
@@ -93,6 +94,7 @@ local FOLDER_ORDER = {
         'Utility',
     }),
     ['Other'] = order_map({
+        'Uncategorized',
         'Unknown',
     }),
 }
@@ -271,97 +273,11 @@ local function get_keys(node_or_assignment)
 end
 
 function organized_tree.get_organized_route(node_or_assignment)
-    local assignment = node_or_assignment and (node_or_assignment.assignment or node_or_assignment)
-    local keys = get_keys(node_or_assignment)
-    local k2, k3, k4 = keys[2], keys[3], keys[4]
-
-    -- Reactive and explicit overlays before broad state/magic buckets.
-    if k2 == 'buff' and k3 == 'Doom' then
-        return route('Reactive', 'Doom')
-    elseif k2 == 'buff' and k3 == 'Sleep' then
-        return route('Reactive', 'Sleep')
-    elseif k2 == 'idle' and (k3 == 'Weak' or k3 == 'Weakness') then
-        return route('Reactive', 'Weakness')
-    elseif k2 == 'buff' or k2 == 'HPDown' or k2 == 'HPCure' then
-        return route('Reactive', 'Status / Emergency')
-    elseif k2 == 'TreasureHunter' then
-        return route('Overlays / Modifiers', 'Treasure Hunter')
-    elseif k2 == 'MagicBurst' or k2 == 'ResistantMagicBurst'
-        or k2 == 'RecoverBurst' or k2 == 'ResistantRecoverBurst' then
-        return route('Overlays / Modifiers', 'Magic Burst')
-    elseif k2 == 'MaxTP' or k2 == 'AccMaxTP' then
-        return route('Overlays / Modifiers', 'Max TP')
-    elseif k2 == 'Self_Healing' or k2 == 'Cure_Received'
-        or k2 == 'Self_Refresh' or k2 == 'Phalanx_Received' then
-        return route('Overlays / Modifiers', 'Self / Received Effects')
-    elseif k2 == 'MP' or k2 == 'SuppaBrutal' or k2 == 'Suppa'
-        or k2 == 'DWEarrings' or k2 == 'DWMax' or k2 == 'ExtraMeleeMode'
-        or k2 == 'Extra_Melee' or k2 == 'Knockback' then
-        return route('Overlays / Modifiers', 'Extra Melee')
+    local info = semantics.classify_organized(node_or_assignment)
+    if info and info.route then
+        return info.route
     end
-
-    -- Persistent/current-state buckets.
-    if k2 == 'engaged' then
-        return route('Current State', 'Engaged')
-    elseif k2 == 'idle' then
-        return route('Current State', 'Idle')
-    elseif k2 == 'resting' then
-        return route('Current State', 'Resting')
-    elseif k2 == 'defense' then
-        return route('Current State', 'Defense')
-    elseif is_movement_name(k2) then
-        return route('Current State', 'Movement')
-    end
-
-    -- Action buckets.
-    if k2 == 'precast' and k3 == 'JA' then
-        return route('Actions', 'Job Abilities')
-    elseif k2 == 'precast' and k3 == 'WS' then
-        if k4 then return route('Actions', 'Weapon Skills', k4) end
-        return route('Actions', 'Weapon Skills')
-    elseif k2 == 'precast' and k3 == 'RA' then
-        return route('Actions', 'Ranged')
-    elseif k2 == 'midcast' and k3 == 'RA' then
-        return route('Actions', 'Ranged')
-    elseif (k2 == 'precast' and (k3 == 'Waltz' or k3 == 'Step' or k3 == 'Flourish1'))
-        or k2 == 'Self_Waltz' then
-        return route('Actions', 'Waltz / Steps / Flourishes')
-    elseif is_utility_name(k2) then
-        return route('Actions', 'Items / Utility')
-    end
-
-    -- Magic buckets.
-    if k2 == 'precast' and k3 == 'FC' then
-        return route('Magic', 'Precast')
-    elseif k2 == 'midcast' then
-        if is_healing_spell(k3) then
-            return route('Magic', 'Cure / Healing')
-        elseif is_enhancing_spell(k3) then
-            return route('Magic', 'Enhancing')
-        elseif is_enfeebling_spell(k3) then
-            return route('Magic', 'Enfeebling')
-        elseif is_elemental_spell(k3) then
-            return route('Magic', 'Elemental / Nuking')
-        elseif is_dark_spell(k3) then
-            return route('Magic', 'Dark')
-        elseif is_song_spell(k3) then
-            return route('Magic', 'Songs')
-        elseif k3 == 'Blue Magic' then
-            return route('Magic', 'Blue Magic')
-        end
-        if refs_contain(assignment, 'TreasureHunter') then
-            return route('Overlays / Modifiers', 'Treasure Hunter')
-        end
-        return route('Magic', 'Midcast')
-    elseif k2 == 'element' then
-        return route('Magic', 'Elemental / Nuking')
-    end
-
-    if k2 == 'weapons' then
-        return route('Weapons', weapon_subfolder(keys))
-    end
-
-    return route('Other', 'Unknown')
+    return route('Other', 'Uncategorized')
 end
 
 function organized_tree.leaf_label(node_or_assignment)

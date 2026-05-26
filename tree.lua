@@ -82,12 +82,19 @@ function tree.equip_command(node)
     local s = node.path[1] -- "sets"
     for i = 2, #node.path do
         local k = node.path[i]
+        k = tostring(k or '')
+        if k == '' then
+            return nil, 'Cannot serialize an empty path segment for gs equip.'
+        end
+        if k:find('[\r\n]') then
+            return nil, 'Cannot serialize a path segment containing a newline.'
+        end
         if k:match('^[%a_][%w_]*$') then
             s = s .. '.' .. k
         else
-            -- Escape any embedded single quotes
-            local escaped = k:gsub("'", "\\'")
-            s = s .. "['" .. escaped .. "']"
+            -- Use double-quoted bracket syntax so apostrophes stay intact.
+            local escaped = k:gsub('\\', '\\\\'):gsub('"', '\\"')
+            s = s .. '["' .. escaped .. '"]'
         end
     end
     return 'gs equip ' .. s
@@ -97,11 +104,12 @@ end
 function tree.path_string(node)
     local s = node.path[1]
     for i = 2, #node.path do
-        local k = node.path[i]
+        local k = tostring(node.path[i] or '')
         if k:match('^[%a_][%w_]*$') then
             s = s .. '.' .. k
         else
-            s = s .. '["' .. k .. '"]'
+            local escaped = k:gsub('\\', '\\\\'):gsub('"', '\\"')
+            s = s .. '["' .. escaped .. '"]'
         end
     end
     return s

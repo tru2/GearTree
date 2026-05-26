@@ -993,7 +993,13 @@ local function capture_baseline_for(node)
 end
 
 local function equip_node(node, cmd)
-    last_auto_equip_path = tree.path_string(node)
+    local path = tree.path_string(node)
+    if not cmd then
+        gt_chat(CHAT.warn, 'Skipping auto-equip for ' .. path .. ': command could not be serialized safely.')
+        return
+    end
+    last_auto_equip_path = path
+    gt_chat(CHAT.detail, 'Equip command: ' .. cmd)
     windower.send_command(cmd)
     capture_baseline_for(node)
 end
@@ -1023,8 +1029,11 @@ local function handle_selection_changed(node)
     local path = tree.path_string(node)
     if path == last_auto_equip_path then return end
 
-    local cmd = tree.equip_command(node)
-    if not cmd then return end
+    local cmd, cmd_err = tree.equip_command(node)
+    if not cmd then
+        gt_chat(CHAT.warn, 'Skipping auto-equip for ' .. path .. ': ' .. tostring(cmd_err or 'command could not be serialized safely.'))
+        return
+    end
 
     last_auto_equip_path = path
     equip_node(node, cmd)
@@ -1098,6 +1107,14 @@ local function show_save_feedback(path, changes, baseline, result, alias_notes, 
     gt_chat(CHAT.info, 'GearSwap reload queued.')
 end
 
+local function remember_undo_backup(file_path, set_path, result)
+    if not result or not result.backup then return end
+    settings.last_undo_backup = result.backup
+    settings.last_undo_file = file_path or ''
+    settings.last_undo_set_path = set_path or ''
+    settings:save()
+end
+
 local function finish_save(node, path, baseline, current, changes, result, alias_notes, extra_lines)
     local saved_slots = changed_slot_names(changes)
     remember_last_saved_set(path)
@@ -1114,15 +1131,13 @@ local function finish_save(node, path, baseline, current, changes, result, alias
     remember_undo_backup(current_file, path, result)
     show_save_feedback(path, changes, baseline, result, alias_notes, extra_lines)
     windower.send_command('gs reload')
-    re_equip_after_gearswap_reload(node, tree.equip_command(node))
-end
-
-local function remember_undo_backup(file_path, set_path, result)
-    if not result or not result.backup then return end
-    settings.last_undo_backup = result.backup
-    settings.last_undo_file = file_path or ''
-    settings.last_undo_set_path = set_path or ''
-    settings:save()
+    local cmd, cmd_err = tree.equip_command(node)
+    if not cmd then
+        gt_chat(CHAT.warn, 'Skipping re-equip after save for ' .. path .. ': ' .. tostring(cmd_err or 'command could not be serialized safely.'))
+        return
+    end
+    gt_chat(CHAT.detail, 'Re-equip command: ' .. cmd)
+    re_equip_after_gearswap_reload(node, cmd)
 end
 
 load_file = function(path, keep_baselines)

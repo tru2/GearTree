@@ -4,6 +4,13 @@
 
 local semantics = {}
 
+local function normalize_token_key(value)
+    local key = tostring(value or ''):lower()
+    key = key:gsub('&', 'and')
+    key = key:gsub('[%s%p_]+', '')
+    return key
+end
+
 local TOKEN_INFO = {
     SA = {
         condition = 'Sneak Attack active',
@@ -375,7 +382,8 @@ local function path_string(node)
 end
 
 local function canonical_token(token)
-    return ALIASES[token] or token
+    local key = normalize_token_key(token)
+    return ALIASES[key] or ALIASES[token] or token
 end
 
 local function token_info(token)
@@ -491,6 +499,235 @@ local function inheritance_for(node)
     return info
 end
 
+local function get_keys(node_or_assignment)
+    if not node_or_assignment then return {} end
+    if node_or_assignment.keys then return node_or_assignment.keys end
+    if node_or_assignment.path then return node_or_assignment.path end
+    if node_or_assignment.assignment and node_or_assignment.assignment.keys then
+        return node_or_assignment.assignment.keys
+    end
+    return {}
+end
+
+local function get_assignment(node_or_assignment)
+    if not node_or_assignment then return nil end
+    if node_or_assignment.assignment then return node_or_assignment.assignment end
+    if node_or_assignment.keys then return node_or_assignment end
+    return nil
+end
+
+local function route_parts(...)
+    local out = {}
+    for i = 1, select('#', ...) do
+        local value = select(i, ...)
+        if value and value ~= '' then
+            out[#out + 1] = value
+        end
+    end
+    return out
+end
+
+local function route_info(route, category, source, rule, trigger, debug)
+    return {
+        route = route,
+        category = category,
+        source = source,
+        rule = rule,
+        trigger = trigger,
+        debug = debug or {},
+    }
+end
+
+local function strong_route_from_target(target)
+    local key = normalize_token_key(target)
+    if key == '' then return nil end
+
+    if key:find('setsweapons', 1, true) then
+        return route_info(route_parts('Weapons'), 'Weapon Loadout', 'helper/reference', 'reference target -> weapons', 'Weapon loadout', { 'Reference target: ' .. tostring(target) })
+    elseif key:find('setsprecastws', 1, true) then
+        return route_info(route_parts('Actions', 'Weapon Skills'), 'Weapon Skill Set', 'helper/reference', 'reference target -> precast.WS', 'Weapon Skill', { 'Reference target: ' .. tostring(target) })
+    elseif key:find('setsprecastja', 1, true) then
+        return route_info(route_parts('Actions', 'Job Abilities'), 'Job Ability Set', 'helper/reference', 'reference target -> precast.JA', 'Job Ability', { 'Reference target: ' .. tostring(target) })
+    elseif key:find('setsprecastfc', 1, true) then
+        return route_info(route_parts('Magic', 'Precast'), 'Pre-Action Timing', 'helper/reference', 'reference target -> precast.FC', 'Magic -> Precast', { 'Reference target: ' .. tostring(target) })
+    elseif key:find('setsprecastra', 1, true) or key:find('setsmidcastra', 1, true) then
+        return route_info(route_parts('Actions', 'Ranged'), 'Ranged Attack Set', 'helper/reference', 'reference target -> ranged', 'Ranged Attack', { 'Reference target: ' .. tostring(target) })
+    elseif key:find('setsmidcast', 1, true) then
+        return route_info(route_parts('Magic', 'Midcast'), 'Magic Midcast', 'helper/reference', 'reference target -> midcast', 'Magic Midcast', { 'Reference target: ' .. tostring(target) })
+    elseif key:find('setsidle', 1, true) then
+        return route_info(route_parts('Current State', 'Idle'), 'Idle / Recovery Sets', 'helper/reference', 'reference target -> idle', 'Idle state', { 'Reference target: ' .. tostring(target) })
+    elseif key:find('setsengaged', 1, true) then
+        return route_info(route_parts('Current State', 'Engaged'), 'Melee / TP Sets', 'helper/reference', 'reference target -> engaged', 'Engaged melee state', { 'Reference target: ' .. tostring(target) })
+    elseif key:find('setsresting', 1, true) then
+        return route_info(route_parts('Current State', 'Resting'), 'Resting / Recovery Sets', 'helper/reference', 'reference target -> resting', 'Resting state', { 'Reference target: ' .. tostring(target) })
+    elseif key:find('setsdefense', 1, true) then
+        return route_info(route_parts('Current State', 'Defense'), 'Defensive Modes', 'helper/reference', 'reference target -> defense', 'Defense mode', { 'Reference target: ' .. tostring(target) })
+    end
+
+    return nil
+end
+
+local function helper_route_from_keys(keys)
+    if keys[2] ~= 'buff' then return nil end
+    local token = tostring(keys[3] or '')
+    local canonical = canonical_token(token)
+    local info = token_info(token)
+    if not info then return nil end
+
+    if canonical == 'SA' or canonical == 'TA' or canonical == 'SATA' then
+        return route_info(route_parts('Actions', 'Job Abilities'), 'Job Ability Set', 'helper/reference', 'buff helper token -> job ability', 'Job Ability', { 'Helper token: ' .. token })
+    elseif canonical == 'Doom' then
+        return route_info(route_parts('Reactive', 'Doom'), 'Status / Condition Responses', 'helper/reference', 'buff helper token -> doom', 'Doom status', { 'Helper token: ' .. token })
+    elseif canonical == 'Sleep' then
+        return route_info(route_parts('Reactive', 'Sleep'), 'Status / Condition Responses', 'helper/reference', 'buff helper token -> sleep', 'Sleep status', { 'Helper token: ' .. token })
+    elseif canonical == 'Weakness' then
+        return route_info(route_parts('Reactive', 'Weakness'), 'Status / Condition Responses', 'helper/reference', 'buff helper token -> weakness', 'weakness', { 'Helper token: ' .. token })
+    end
+
+    return route_info(route_parts('Reactive', 'Buff Override'), 'Buff / Debuff Overrides', 'raw path', 'buff path -> reactive override', 'Buff/reactive override', { 'Raw path: buff' })
+end
+
+local function raw_path_route_for_keys(keys)
+    local k2, k3 = keys[2], keys[3]
+
+    if k2 == 'TreasureHunter' then
+        return route_info(route_parts('Overlays / Modifiers', 'Treasure Hunter'), 'Loot / Tagging Overlay', 'raw path', 'Treasure Hunter path', 'Treasure Hunter tagging', { 'Raw path: TreasureHunter' })
+    elseif k2 == 'MagicBurst' or k2 == 'ResistantMagicBurst'
+        or k2 == 'RecoverBurst' or k2 == 'ResistantRecoverBurst' then
+        return route_info(route_parts('Overlays / Modifiers', 'Magic Burst'), 'Layered Set Modifiers', 'raw path', 'magic burst path', 'Magic Burst mode', { 'Raw path: MagicBurst' })
+    elseif k2 == 'MaxTP' or k2 == 'AccMaxTP' then
+        return route_info(route_parts('Overlays / Modifiers', 'Max TP'), 'Layered Set Modifiers', 'raw path', 'max TP path', 'high/max TP', { 'Raw path: MaxTP' })
+    elseif k2 == 'Self_Healing' or k2 == 'Cure_Received'
+        or k2 == 'Self_Refresh' or k2 == 'Phalanx_Received' then
+        return route_info(route_parts('Overlays / Modifiers', 'Self / Received Effects'), 'Layered Set Modifiers', 'raw path', 'self/received effect path', 'Self / Received Effects', { 'Raw path: self/received effect' })
+    elseif k2 == 'MP' or k2 == 'SuppaBrutal' or k2 == 'Suppa'
+        or k2 == 'DWEarrings' or k2 == 'DWMax' or k2 == 'ExtraMeleeMode'
+        or k2 == 'Extra_Melee' or k2 == 'Knockback' then
+        return route_info(route_parts('Overlays / Modifiers', 'Extra Melee'), 'Layered Set Modifiers', 'raw path', 'extra melee path', 'Extra Melee', { 'Raw path: extra melee' })
+    elseif k2 == 'engaged' then
+        if #keys == 2 then
+            return route_info(route_parts('Current State', 'Engaged'), 'Melee / TP Sets', 'path', 'sets.engaged', 'Engaged melee state', { 'Strong path: engaged' })
+        end
+        if has_token(keys, 'PDT') or has_token(keys, 'DT') or has_token(keys, 'MDT') or has_token(keys, 'MEVA') then
+            return route_info(route_parts('Current State', 'Engaged'), 'Hybrid Safety Sets', 'path', 'sets.engaged variant', 'Engaged melee state', { 'Strong path: engaged variant' })
+        end
+        return route_info(route_parts('Current State', 'Engaged'), 'Melee / TP Sets', 'path', 'sets.engaged', 'Engaged melee state', { 'Strong path: engaged' })
+    elseif k2 == 'idle' then
+        return route_info(route_parts('Current State', 'Idle'), #keys == 2 and 'Idle / Recovery Sets' or 'Idle / Recovery Sets', 'path', 'sets.idle', 'Idle state', { 'Strong path: idle' })
+    elseif k2 == 'resting' then
+        return route_info(route_parts('Current State', 'Resting'), 'Resting / Recovery Sets', 'path', 'sets.resting', 'Resting state', { 'Strong path: resting' })
+    elseif k2 == 'defense' then
+        return route_info(route_parts('Current State', 'Defense'), 'Defensive Modes', 'path', 'sets.defense', 'Defense mode', { 'Strong path: defense' })
+    elseif k2 == 'precast' and k3 == 'WS' then
+        return route_info(route_parts('Actions', 'Weapon Skills'), 'Weapon Skill Set', 'path', 'sets.precast.WS', 'Weapon Skill', { 'Strong path: precast.WS' })
+    elseif k2 == 'precast' and k3 == 'JA' then
+        return route_info(route_parts('Actions', 'Job Abilities'), 'Job Ability Set', 'path', 'sets.precast.JA', 'Job Ability', { 'Strong path: precast.JA' })
+    elseif k2 == 'precast' and k3 == 'RA' then
+        return route_info(route_parts('Actions', 'Ranged'), 'Ranged Attack Set', 'path', 'sets.precast.RA', 'Ranged Attack', { 'Strong path: precast.RA' })
+    elseif k2 == 'midcast' and k3 == 'RA' then
+        return route_info(route_parts('Actions', 'Ranged'), 'Ranged Attack Set', 'path', 'sets.midcast.RA', 'Ranged Attack', { 'Strong path: midcast.RA' })
+    elseif k2 == 'precast' and k3 == 'FC' then
+        return route_info(route_parts('Magic', 'Precast'), 'Pre-Action Timing', 'path', 'sets.precast.FC', 'Magic -> Precast', { 'Strong path: precast.FC' })
+    elseif k2 == 'precast' and (k3 == 'Waltz' or k3 == 'Step' or k3 == 'Flourish1') then
+        return route_info(route_parts('Actions', 'Waltz / Steps / Flourishes'), 'Action-Triggered Sets', 'path', 'sets.precast action family', 'Action timing', { 'Strong path: precast action family' })
+    elseif k2 == 'weapons' then
+        return route_info(route_parts('Weapons'), 'Weapon Loadout', 'path', 'sets.weapons', 'Weapon loadout', { 'Strong path: weapons' })
+    end
+
+    return nil
+end
+
+local function content_route_for_keys(keys, inheritance)
+    local k2, k3 = keys[2], keys[3]
+    if k2 == 'midcast' then
+        if is_healing_spell(k3) then
+            return route_info(route_parts('Magic', 'Cure / Healing'), 'Healing / Cure Sets', 'content heuristic', 'midcast spell family -> healing', 'Healing Magic', { 'Content heuristic: healing spell family' })
+        elseif is_enhancing_spell(k3) then
+            return route_info(route_parts('Magic', 'Enhancing'), 'Buff Duration / Enhancing Sets', 'content heuristic', 'midcast spell family -> enhancing', 'Enhancing Magic', { 'Content heuristic: enhancing spell family' })
+        elseif is_enfeebling_spell(k3) then
+            return route_info(route_parts('Magic', 'Enfeebling'), 'Debuff / Magic Accuracy Sets', 'content heuristic', 'midcast spell family -> enfeebling', 'Enfeebling Magic', { 'Content heuristic: enfeebling spell family' })
+        elseif is_elemental_spell(k3) then
+            return route_info(route_parts('Magic', 'Elemental / Nuking'), 'Nuking / Elemental Sets', 'content heuristic', 'midcast spell family -> elemental', 'Elemental Magic', { 'Content heuristic: elemental spell family' })
+        elseif is_dark_spell(k3) then
+            return route_info(route_parts('Magic', 'Dark'), 'Dark Magic Sets', 'content heuristic', 'midcast spell family -> dark', 'Dark Magic', { 'Content heuristic: dark spell family' })
+        elseif is_song_spell(k3) then
+            return route_info(route_parts('Magic', 'Songs'), 'Bard Song Sets', 'content heuristic', 'midcast spell family -> songs', 'Bard Song', { 'Content heuristic: song spell family' })
+        elseif k3 == 'Blue Magic' then
+            return route_info(route_parts('Magic', 'Blue Magic'), 'Blue Magic Sets', 'content heuristic', 'midcast spell family -> blue magic', 'Blue Magic', { 'Content heuristic: blue magic family' })
+        end
+        if references_treasure_hunter(inheritance) then
+            return route_info(route_parts('Overlays / Modifiers', 'Treasure Hunter'), 'Loot / Tagging Overlay', 'content heuristic', 'treasure hunter reference in midcast', 'Treasure Hunter tagging', { 'Content heuristic: Treasure Hunter reference' })
+        end
+        return route_info(route_parts('Magic', 'Midcast'), 'Spellcasting Sets', 'content heuristic', 'midcast fallback', 'Magic -> Midcast', { 'Content heuristic: generic midcast' })
+    elseif k2 == 'TreasureHunter' then
+        return route_info(route_parts('Overlays / Modifiers', 'Treasure Hunter'), 'Loot / Tagging Overlay', 'raw path', 'TreasureHunter path', 'Treasure Hunter tagging', { 'Raw path: TreasureHunter' })
+    elseif is_movement_key(k2) then
+        return route_info(route_parts('Current State', 'Movement'), 'Movement / Travel Sets', 'raw path', 'movement path', 'Movement / Kiting mode', { 'Raw path: movement' })
+    elseif k2 == 'Knockback' then
+        return route_info(route_parts('Overlays / Modifiers', 'Extra Melee'), 'Utility Sets', 'raw path', 'knockback utility path', 'Knockback/positioning mode', { 'Raw path: Knockback' })
+    elseif k2 == 'item' or k2 == 'items' or k2 == 'itemuse' then
+        return route_info(route_parts('Actions', 'Items / Utility'), 'Item-Use Sets', 'raw path', 'item-use path', 'Item use', { 'Raw path: item-use' })
+    end
+
+    return nil
+end
+
+local function classify_organized(node_or_assignment)
+    local keys = get_keys(node_or_assignment)
+    local assignment = get_assignment(node_or_assignment)
+    local inheritance = inheritance_for(node_or_assignment)
+    local debug = {}
+
+    local function finish(info)
+        if not info then return nil end
+        info.keys = keys
+        info.assignment = assignment
+        info.inheritance = inheritance
+        info.debug = info.debug or debug
+        return info
+    end
+
+    local strong = raw_path_route_for_keys(keys)
+    if strong then
+        return finish(strong)
+    end
+
+    if assignment and assignment.rhs then
+        local rhs = assignment.rhs
+        if rhs.kind == 'ref' then
+            local ref_route = strong_route_from_target(rhs.target)
+            if ref_route then
+                ref_route.debug[#ref_route.debug + 1] = 'Reference path: ' .. tostring(rhs.target)
+                return finish(ref_route)
+            end
+        elseif rhs.kind == 'combine' then
+            for _, ref in ipairs(rhs.refs or {}) do
+                local ref_route = strong_route_from_target(ref)
+                if ref_route then
+                    ref_route.debug[#ref_route.debug + 1] = 'Combine reference: ' .. tostring(ref)
+                    return finish(ref_route)
+                end
+            end
+        end
+    end
+
+    local helper = helper_route_from_keys(keys)
+    if helper then
+        return finish(helper)
+    end
+
+    if keys[2] == 'buff' then
+        return finish(route_info(route_parts('Reactive', 'Buff Override'), 'Buff / Debuff Overrides', 'raw path', 'buff path fallback', 'Buff/reactive override', { 'Raw path: buff' }))
+    end
+
+    local content = content_route_for_keys(keys, inheritance)
+    if content then
+        return finish(content)
+    end
+
+    return finish(route_info(route_parts('Other', 'Uncategorized'), 'Miscellaneous / Custom Sets', 'fallback', 'no strong path or helper match', 'Unknown', { 'Fallback: no strong semantic match' }))
+end
+
 local function source_for(assignment)
     if not assignment then return 'Unknown source' end
     local file = assignment.source_file or 'Lua file'
@@ -516,81 +753,16 @@ local function title_for(keys)
 end
 
 local function category_for(keys)
-    if keys[2] == 'engaged' then
-        if #keys == 2 then return 'Base Engaged State' end
-        if has_token(keys, 'PDT') or has_token(keys, 'DT') or has_token(keys, 'MDT') or has_token(keys, 'MEVA') then
-            return 'Defensive Engaged Variant'
-        end
-        return 'Engaged Variant'
-    elseif keys[2] == 'idle' then
-        return #keys == 2 and 'Idle State' or 'Idle Variant'
-    elseif keys[2] == 'resting' then
-        return 'Resting State'
-    elseif keys[2] == 'defense' then
-        return 'Defense Set'
-    elseif keys[2] == 'precast' and keys[3] == 'WS' then
-        return #keys > 4 and 'Weapon Skill Modifier' or 'Weapon Skill Set'
-    elseif keys[2] == 'precast' and keys[3] == 'JA' then
-        return 'Job Ability Set'
-    elseif keys[2] == 'precast' and keys[3] == 'FC' then
-        return #keys > 3 and 'Magic Precast Variant' or 'Magic Precast'
-    elseif keys[2] == 'precast' and keys[3] == 'RA' then
-        return 'Ranged Precast'
-    elseif keys[2] == 'midcast' and keys[3] == 'RA' then
-        return 'Ranged Midcast'
-    elseif keys[2] == 'midcast' then
-        return 'Magic Midcast'
-    elseif keys[2] == 'TreasureHunter' then
-        return 'Utility Overlay'
-    elseif keys[2] == 'buff' then
-        return 'Reactive / Buff Override'
-    elseif keys[2] == 'weapons' then
-        return 'Weapon Loadout'
-    elseif is_movement_key(keys[2]) then
-        return 'Movement / Utility Overlay'
-    elseif keys[2] == 'Knockback' then
-        return 'Utility Overlay'
-    end
+    local info = classify_organized({ keys = keys })
+    if info and info.category then return info.category end
     return 'Unknown / Custom Set'
 end
 
 local function trigger_for(keys, category)
-    if keys[2] == 'precast' and keys[3] == 'WS' and keys[4] then
-        return 'Weapon Skill -> ' .. keys[4]
-    elseif keys[2] == 'precast' and keys[3] == 'WS' then
-        return 'Weapon Skill'
-    elseif keys[2] == 'precast' and keys[3] == 'JA' and keys[4] then
-        return 'Job Ability -> ' .. keys[4]
-    elseif keys[2] == 'precast' and keys[3] == 'JA' then
-        return 'Job Ability'
-    elseif keys[2] == 'precast' and keys[3] == 'FC' then
-        return keys[4] and ('Magic -> Precast -> ' .. keys[4]) or 'Magic -> Precast'
-    elseif category == 'Ranged Precast' then
-        return 'Ranged Attack -> Precast'
-    elseif category == 'Ranged Midcast' then
-        return 'Ranged Attack -> Midcast'
-    elseif keys[2] == 'midcast' and keys[3] then
-        return 'Magic -> Midcast -> ' .. keys[3]
-    elseif keys[2] == 'engaged' then
-        return 'Engaged melee state'
-    elseif keys[2] == 'idle' then
-        return 'Idle state'
-    elseif keys[2] == 'resting' then
-        return 'Resting state'
-    elseif keys[2] == 'defense' then
-        return 'Defense mode'
-    elseif keys[2] == 'TreasureHunter' then
-        return 'Treasure Hunter tagging'
-    elseif keys[2] == 'buff' then
-        return 'Buff/reactive override'
-    elseif keys[2] == 'weapons' then
-        return 'Weapon loadout'
-    elseif is_movement_key(keys[2]) then
-        return 'Movement / Kiting mode'
-    elseif keys[2] == 'Knockback' then
-        return 'Knockback/positioning mode'
-    end
-    return 'Unknown'
+    local info = classify_organized({ keys = keys })
+    if info and info.trigger then return info.trigger end
+    if category == 'Unknown / Custom Set' then return 'Unknown' end
+    return category or 'Unknown'
 end
 
 local function references_treasure_hunter(inheritance)
@@ -624,11 +796,18 @@ local function detect_known_item(values, items)
     return nil
 end
 
-local function build_evidence(keys, category, matches, inheritance, node)
+local function build_evidence(keys, category, matches, inheritance, node, classification)
     local evidence = {}
     local lua_path = path_string(node)
     if category ~= 'Unknown / Custom Set' then
         add(evidence, 'Path rule: ' .. lua_path)
+    end
+    if classification then
+        add(evidence, 'Classification source: ' .. tostring(classification.source or 'unknown'))
+        add(evidence, 'Classification rule: ' .. tostring(classification.rule or 'unknown'))
+        for _, line in ipairs(classification.debug or {}) do
+            add(evidence, tostring(line))
+        end
     end
     for _, match in ipairs(matches) do
         add(evidence, 'Semantic keyword: ' .. match.token)
@@ -1257,6 +1436,20 @@ local CATEGORY_ALIASES = {
     item = 'items',
     items = 'items',
     itemuse = 'items',
+    sa = 'SA',
+    sneakattack = 'SA',
+    ta = 'TA',
+    trickattack = 'TA',
+    sata = 'SATA',
+    doom = 'Doom',
+    sleep = 'Sleep',
+    weakness = 'Weakness',
+    kiting = 'Kiting',
+    movement = 'Movement',
+    movespeed = 'MoveSpeed',
+    runspeed = 'MoveSpeed',
+    running = 'Running',
+    fc = 'FC',
 }
 
 
@@ -1407,16 +1600,17 @@ function semantics.build_set_info(node)
     local keys = (node and node.path) or {}
     local assignment = node and node.assignment
     local inheritance = inheritance_for(node)
-    local category = category_for(keys)
+    local classification = classify_organized(node)
+    local category = (classification and classification.category) or category_for(keys)
     local matches = match_tokens(keys)
     local plain, purpose = plain_text_for(keys, category, inheritance)
-    local evidence = build_evidence(keys, category, matches, inheritance, node)
+    local evidence = build_evidence(keys, category, matches, inheritance, node, classification)
 
     return {
         title = title_for(keys),
         category = category,
         plain_english = plain,
-        trigger = trigger_for(keys, category),
+        trigger = (classification and classification.trigger) or trigger_for(keys, category),
         conditions = build_conditions(keys, category, inheritance),
         purpose = purpose,
         confidence = confidence_for(category, matches, evidence),
@@ -1424,7 +1618,14 @@ function semantics.build_set_info(node)
         lua_path = path_string(node),
         source = source_for(assignment),
         inheritance = inheritance,
+        classification_source = classification and classification.source or nil,
+        classification_rule = classification and classification.rule or nil,
+        classification_debug = classification and classification.debug or nil,
     }
+end
+
+function semantics.classify_organized(node_or_assignment)
+    return classify_organized(node_or_assignment)
 end
 
 return semantics
