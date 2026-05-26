@@ -1,6 +1,6 @@
 -- GearTree notes integration layer
--- Wraps the facelift backend so notes can be displayed and edited without
--- changing GearSwap Lua source files.
+-- Wraps the facelift backend so personal notes can be displayed and edited
+-- without changing GearSwap Lua source files.
 
 local tree = require('tree')
 local notes = require('notes')
@@ -22,11 +22,17 @@ local NOTE_WRAP_COLS = 52
 
 local original_build_set_info = semantics.build_set_info
 local original_show_preview = backend.show_preview
+local original_register_event = windower and windower.register_event or nil
 
 local function gt_chat(color, message)
     if windower and windower.add_to_chat then
         windower.add_to_chat(color, '[GearTree] ' .. message)
     end
+end
+
+local function is_note_command(cmd)
+    cmd = tostring(cmd or ''):lower()
+    return cmd == 'note' or cmd == 'notes'
 end
 
 local function find_upvalue(fn, target_name)
@@ -61,18 +67,16 @@ local function note_for_node(node)
     return notes.get(path) or ''
 end
 
-local function add_note_to_info(node, info)
+local function add_note_metadata(node, info)
     info = info or {}
-
     -- Keep notes as metadata only. Do not inject them into plain_english,
     -- because that makes the note look like it overwrote the generated summary.
     info.user_note = note_for_node(node)
-
     return info
 end
 
 semantics.build_set_info = function(node)
-    return add_note_to_info(node, original_build_set_info(node) or {})
+    return add_note_metadata(node, original_build_set_info(node) or {})
 end
 
 local function append_line(out, text, color)
@@ -115,6 +119,7 @@ end
 local function append_notes_section(node)
     local state = backend_state
     if not state or type(state.preview_cards) ~= 'table' then return end
+
     local summary = state.preview_cards.summary
     if type(summary) ~= 'table' then return end
 
@@ -198,12 +203,26 @@ local function handle_note_command(args)
     return true
 end
 
-if windower and windower.register_event then
-    windower.register_event('addon command', function(cmd, ...)
-        cmd = tostring(cmd or ''):lower()
-        if cmd ~= 'note' and cmd ~= 'notes' then return false end
+-- Register the real note handler here. Windower still calls every addon-command
+-- handler registered by this addon, so we also wrap later registrations to keep
+-- the main GearTree command dispatcher from printing "Unknown command: note".
+if original_register_event then
+    original_register_event('addon command', function(cmd, ...)
+        if not is_note_command(cmd) then return false end
         return handle_note_command({ ... })
     end)
+
+    windower.register_event = function(event_name, callback)
+        if event_name == 'addon command' and type(callback) == 'function' then
+            return original_register_event(event_name, function(cmd, ...)
+                if is_note_command(cmd) then
+                    return true
+                end
+                return callback(cmd, ...)
+            end)
+        end
+        return original_register_event(event_name, callback)
+    end
 end
 
 return backend
