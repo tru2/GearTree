@@ -4,6 +4,8 @@ local slots = require('gear_slots')
 
 local writer = {}
 
+local BACKUPS_PER_FILE = 5
+
 local function read_file(path)
     local f, err = io.open(path, 'r')
     if not f then return nil, err end
@@ -33,6 +35,55 @@ local function ensure_backup_dir()
     return dir
 end
 
+local function cmd_quote(path)
+    return '"' .. tostring(path or ''):gsub('"', ''):gsub('/', '\\') .. '"'
+end
+
+local function is_backup_for_basename(filename, basename)
+    filename = tostring(filename or '')
+    basename = tostring(basename or '')
+    local prefix = basename .. '.'
+    if filename:sub(1, #prefix) ~= prefix then return false end
+
+    local suffix = filename:sub(#prefix + 1)
+    return suffix:match('^%d%d%d%d%d%d%d%d_%d%d%d%d%d%d%.bak$') ~= nil
+        or suffix:match('^%d%d%d%d%d%d%d%d_%d%d%d%d%d%d%.%d+%.bak$') ~= nil
+end
+
+local function cleanup_old_backups(path)
+    -- Keep only the newest few backups for this Lua filename. This is best-effort:
+    -- save safety is more important than cleanup, so errors here are ignored.
+    if not io.popen or not os.remove then return end
+
+    local dir = ensure_backup_dir()
+    local basename = path_basename(path)
+    local command = 'cmd /c dir /b /a-d ' .. cmd_quote(dir .. basename .. '.*.bak') .. ' 2>nul'
+
+    local ok, pipe = pcall(io.popen, command)
+    if not ok or not pipe then return end
+
+    local backups = {}
+    for line in pipe:lines() do
+        local name = tostring(line or ''):gsub('\r', ''):gsub('^%s+', ''):gsub('%s+$', '')
+        local filename = name:match('[^/\\]+$') or name
+        if is_backup_for_basename(filename, basename) then
+            backups[#backups + 1] = {
+                name = filename,
+                path = dir .. filename,
+            }
+        end
+    end
+    pipe:close()
+
+    table.sort(backups, function(a, b)
+        return tostring(a.name) > tostring(b.name)
+    end)
+
+    for i = BACKUPS_PER_FILE + 1, #backups do
+        pcall(os.remove, backups[i].path)
+    end
+end
+
 local function backup_file(path, src)
     local dir = ensure_backup_dir()
     local stem = dir .. path_basename(path) .. '.' .. os.date('%Y%m%d_%H%M%S')
@@ -47,6 +98,7 @@ local function backup_file(path, src)
     end
     local ok, err = write_file(backup, src)
     if not ok then return nil, err end
+    cleanup_old_backups(path)
     return backup
 end
 
