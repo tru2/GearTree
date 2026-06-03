@@ -76,8 +76,9 @@ GearTree also reads `--` comments written directly above a set in your Lua file 
 For example, a set like this:
 
 ```lua
--- Main melee set. Swap head for Nyame once upgraded.
-sets.engaged = { ... }
+-- Weaponskill sets
+-- Default set for any weaponskill that isn't any more specifically defined
+sets.precast.WS = { ... }
 ```
 
 will show that comment in the Notes section without any extra steps.
