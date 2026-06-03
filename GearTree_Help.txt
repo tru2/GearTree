@@ -156,9 +156,26 @@ Interface Settings
 //gt shift on
 //gt shift off
     Enable or disable Shift+Arrow navigation.
+    Default: ON. When on, plain arrow keys pass through to FFXI and
+    Shift+Arrow keys control GearTree navigation.
+    Existing users may need to run //gt shift on to enable the new default.
 
 //gt shift status
     Display current keyboard navigation mode.
+
+//gt clicklock on
+//gt clicklock off
+    Enable or disable Click Lock.
+    Default: ON. When on, mouse clicks over the GearTree window are consumed
+    and do not pass through to FFXI. Clicks outside GearTree always pass
+    through to the game normally.
+    Existing users may need to run //gt clicklock on to enable the new default.
+
+//gt clicklock toggle
+    Flip Click Lock between on and off.
+
+//gt clicklock status
+    Display current Click Lock state.
 
 //gt cursor on
 //gt cursor off

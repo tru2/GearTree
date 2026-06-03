@@ -23,6 +23,7 @@ GearTree provides:
 * Automatic backups
 * Undo functionality
 * Mouse and keyboard navigation
+* Click Lock to prevent clicks from passing through to FFXI
 * UI scaling and customization
 
 Whether you maintain a simple job file or a highly customized endgame setup, GearTree makes managing gear significantly easier.
@@ -136,12 +137,46 @@ Use `{file}` and `{line}` as placeholders. If the configured command fails, Gear
 
 ### Mouse and Keyboard Navigation
 
-Navigate using:
+Navigate GearTree with the mouse, keyboard, or both.
 
-* Keyboard controls
-* Mouse controls
-* Visual cursor overlay
-* Shift+Arrow navigation mode
+**Shift+Arrow navigation** is on by default. Plain arrow keys pass through to FFXI for camera and menu control. Hold Shift to navigate GearTree:
+
+| Key | Action |
+|-----|--------|
+| Shift+Up / Shift+Down | Move cursor up/down |
+| Shift+Right | Expand folder or equip set |
+| Shift+Left | Collapse folder or go back |
+
+Turn off Shift+Arrow mode if you prefer plain arrows to control GearTree:
+
+`//gt shift off`
+
+---
+
+**Click Lock** prevents mouse clicks from passing through to FFXI while the cursor is over GearTree. Clicks outside GearTree pass through to the game as normal. On by default.
+
+`//gt clicklock off` — turn off Click Lock
+
+`//gt clicklock on` — turn it back on
+
+`//gt clicklock toggle` — flip the current state
+
+---
+
+**Visual cursor overlay** shows a crosshair while the mouse is inside GearTree. On by default.
+
+---
+
+### 0.4.1 Upgrade Note
+
+In 0.4.1, Click Lock and Shift Mode default ON for new installs. Existing users with a saved settings file may need to enable them manually:
+
+```
+//gt clicklock on
+//gt shift on
+```
+
+`//gt cursor off`
 
 ### UI Customization
 

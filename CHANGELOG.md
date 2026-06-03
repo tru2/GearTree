@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.1
+
+### Added
+
+- Click Lock support to prevent mouse clicks from passing through to FFXI while interacting with GearTree.
+
+### Changed
+
+- Click Lock now defaults on for new installs.
+- Shift Mode now defaults on for new installs so normal arrow keys remain available to FFXI unless Shift is held.
+
+### Notes
+
+- Existing users may need to manually enable the new defaults with `//gt clicklock on` and `//gt shift on` because existing settings files preserve previous values.
+
+---
+
 ## 0.4.0
 
 ### Added

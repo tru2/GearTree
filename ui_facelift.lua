@@ -4183,15 +4183,37 @@ local function set_cursor_overlay_visible(vis)
     if state.cursor_img then state.cursor_img:visible(vis) end
 end
 
+-- Computes the full visible GearTree frame rectangle in screen pixels.
+-- Mirrors the geometry chain in update_positions exactly — no cached state,
+-- always derived live from dims()/cfg/LM so it is valid before the first refresh.
+-- Returns left, top, right, bottom.
+local function panel_frame_bounds()
+    local d  = dims()
+    local fp = sc(2)   -- frame_pad matches update_positions
+    local left  = d.x - fp
+    local right = d.x + d.total_w + fp
+    local top   = d.y - fp
+    local row_h     = math.max(sc(6), sc(cfg.row_height + LM.tab_h_adjust + 2))
+    local content_y = d.body_y + sc(LM.tab_y_offset) + row_h + sc(LM.content_top_pad)
+    local footer_bottom = content_y
+        + cfg.visible_rows * sc(cfg.row_height)
+        + sc(LM.content_top_pad) + 1
+        + sc(cfg.footer_height) + sc(LM.footer_h_adjust)
+    local bottom = footer_bottom + sc(4)
+    return left, top, right, bottom
+end
+
 local function point_in_panel(mx, my)
-    local d = dims()
-    local top = d.y
-    -- Compute footer bottom from content geometry (mirrors update_positions).
-    local row_h_pp      = math.max(sc(6), sc(cfg.row_height + LM.tab_h_adjust + 2))
-    local content_y_pp  = d.body_y + row_h_pp + sc(LM.content_top_pad)
-    local footer_bg_h_pp = sc(cfg.footer_height) + sc(LM.footer_h_adjust)
-    local bottom = content_y_pp + cfg.visible_rows * sc(cfg.row_height) + 1 + footer_bg_h_pp
-    return mx >= d.x and mx <= d.x + d.total_w and my >= top and my <= bottom
+    local left, top, right, bottom = panel_frame_bounds()
+    return mx >= left and mx <= right and my >= top and my <= bottom
+end
+
+-- Public: returns true when (mx, my) is inside the full visible GearTree window.
+-- Covers header, body, tabs, tree pane, preview pane, footer, and scrollbars.
+-- Used by the click-lock feature in GearTree.lua.
+function ui.is_mouse_inside_panel(mx, my)
+    if not state.visible then return false end
+    return point_in_panel(mx, my)
 end
 
 local function update_cursor_overlay(mx, my)

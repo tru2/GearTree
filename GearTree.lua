@@ -4,7 +4,7 @@
 
 _addon.name    = 'GearTree'
 _addon.author  = 'Tru + Codex'
-_addon.version = '0.4.0'
+_addon.version = '0.4.1'
 _addon.commands = { 'geartree', 'gt' }
 
 require('logger')
@@ -38,7 +38,7 @@ local defaults = {
     tree_mode = 'organized',
     edit_mode = true,
     -- When true, plain arrow keys pass through to FFXI and Shift+Arrow controls GearTree.
-    shift_arrow_nav = false,
+    shift_arrow_nav = true,
     last_set_path = '',
     last_undo_backup = '',
     last_undo_file = '',
@@ -61,6 +61,9 @@ local defaults = {
     -- visible.  Uses cursor.png from the active theme when present, otherwise
     -- falls back to a primitive crosshair.  Does not affect click behavior.
     cursor_overlay = true,
+    -- Click-lock: when true, mouse clicks over the GearTree panel are consumed
+    -- so FFXI does not also receive them.  Applies to left and right buttons.
+    click_lock = true,
     -- Active visual theme.  Names map to subfolders under themes/.
     theme = 'jeuno',
     -- Global window opacity: 35-100 (100 = fully opaque).  Scales all background
@@ -115,6 +118,7 @@ local current_gear_references = {}
 local baselines = {}
 local edit_mode = settings.edit_mode ~= false
 local shift_arrow_nav = settings.shift_arrow_nav == true
+local click_lock = settings.click_lock ~= false
 local active_edit_path = nil
 local active_edit_node = nil
 local last_auto_equip_path = nil
@@ -1477,6 +1481,30 @@ local function handle_cursor_command(arg)
     end
 end
 
+local function handle_clicklock_command(arg)
+    arg = tostring(arg or 'status'):lower()
+    if arg == 'on' or arg == 'true' or arg == '1' then
+        click_lock = true
+        settings.click_lock = true
+        settings:save()
+        gt_chat(CHAT.info, 'Click-lock: on. Clicks over GearTree will not pass through to FFXI.')
+    elseif arg == 'off' or arg == 'false' or arg == '0' then
+        click_lock = false
+        settings.click_lock = false
+        settings:save()
+        gt_chat(CHAT.info, 'Click-lock: off. Clicks pass through to FFXI normally.')
+    elseif arg == 'toggle' then
+        click_lock = not click_lock
+        settings.click_lock = click_lock
+        settings:save()
+        gt_chat(CHAT.info, 'Click-lock: ' .. (click_lock and 'on' or 'off') .. '.')
+    elseif arg == 'status' or arg == '' then
+        gt_chat(CHAT.info, 'Click-lock: ' .. (click_lock and 'on' or 'off') .. '.')
+    else
+        gt_chat(CHAT.warn, 'Usage: //gt clicklock [on|off|toggle|status]')
+    end
+end
+
 -- Print the actual computed frame/background/zone bounds (read-only diagnostic).
 local function handle_bginfo_command()
     local lines = ui.bounds_lines and ui.bounds_lines() or {}
@@ -2372,25 +2400,38 @@ end
 
 windower.register_event('mouse', function(type, x, y, delta, blocked)
     if blocked then return false end
+
+    -- inside_panel: true when click-lock is ON and the cursor is anywhere inside
+    -- the full GearTree window rectangle (header, body, tabs, preview, footer,
+    -- scrollbars, empty background — the complete visible frame).
+    local inside_panel = click_lock
+        and ui.is_mouse_inside_panel
+        and ui.is_mouse_inside_panel(x, y)
+
     if type == 0 then
         return ui.on_mouse_move(x, y)
     elseif type == 1 then
-        -- Left-click: select/expand/equip row, or begin title drag.
-        return ui.on_left_click(x, y)
+        -- Left button down. Let GearTree act on the click first, then block it
+        -- from reaching FFXI when the cursor is inside the panel.
+        local handled = ui.on_left_click(x, y)
+        if handled or inside_panel then return true end
+        return false
     elseif type == 2 then
-        return ui.on_left_up(x, y)
+        -- Left button up. on_left_up returns true during a header drag, so drag
+        -- release is consumed even if the mouse drifted outside the panel.
+        local handled = ui.on_left_up(x, y)
+        if handled or inside_panel then return true end
+        return false
     elseif type == 3 then
-        -- Right button down: activate in right mode, preview-cursor in left mode.
-        return ui.on_right_click(x, y)
+        local handled = ui.on_right_click(x, y)
+        if handled or inside_panel then return true end
+        return false
     elseif type == 4 then
-        -- Right button up: no action. Right click never starts a drag, so there
-        -- is no up-event cleanup needed (unlike LMB which uses on_left_up).
+        if inside_panel then return true end
         return false
     elseif type == 5 or type == 6 then
-        -- Middle mouse button: do not handle. Pass through to FFXI/Windower.
         return false
     elseif type == 7 or type == 10 then
-        -- Scroll wheel: move cursor
         return ui.on_scroll(x, y, delta)
     end
     return false
@@ -2525,6 +2566,8 @@ windower.register_event('addon command', function(cmd, ...)
         handle_mouse_mode_command(args[1])
     elseif cmd == 'cursor' then
         handle_cursor_command(args[1])
+    elseif cmd == 'clicklock' then
+        handle_clicklock_command(args[1])
     elseif cmd == 'scale' then
         handle_scale_command(args[1])
     elseif cmd == 'opacity' then
@@ -2651,9 +2694,10 @@ windower.register_event('addon command', function(cmd, ...)
         log('  //gt rename <new>  |  //gt rename <folder> to <new>')
         log('  //gt remove [folder]  |  //gt unmove [set]  |  //gt layout reset')
         log('-- Settings --')
-        log('  //gt shift [on|off|status]  - Shift+Arrow navigation (frees plain arrows for FFXI)')
-        log('  //gt mouse [on|off|status]  - left-click activation (on by default)')
-        log('  //gt cursor [on|off|status] - show mouse pointer inside GearTree (on by default)')
+        log('  //gt shift [on|off|status]      - Shift+Arrow navigation, on by default (frees plain arrows for FFXI)')
+        log('  //gt mouse [on|off|status]      - left-click activation (on by default)')
+        log('  //gt cursor [on|off|status]     - show mouse pointer inside GearTree (on by default)')
+        log('  //gt clicklock [on|off|toggle]  - block clicks from passing through to FFXI (on by default)')
         log('  //gt scale [0.75-2.0|reset] - zoom level (default 1.0)')
         log('  //gt opacity [35-100|reset] - window transparency (100 = fully opaque)')
         log('  //gt pos [x y]              - show or set window position')

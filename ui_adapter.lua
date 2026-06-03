@@ -324,6 +324,15 @@ function adapter.on_scroll(mx, my, delta)
     return backend.on_scroll(mx, my, delta)
 end
 
+-- Click-lock panel hit-test: true when (mx, my) is inside the full visible
+-- GearTree window rectangle (header through footer, all panes).
+function adapter.is_mouse_inside_panel(mx, my)
+    if backend.is_mouse_inside_panel then
+        return backend.is_mouse_inside_panel(mx, my)
+    end
+    return false
+end
+
 -- ── Theme switching pass-throughs ──────────────────────────────────────────
 -- These forward to the same-named functions in ui_facelift.lua.
 -- ui_notes_backend returns the facelift module directly so backend has them.
