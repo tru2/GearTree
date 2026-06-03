@@ -91,6 +91,49 @@ Inspect equipment, inventory location, missing items, and additional set informa
 
 ![Data View](Images/Datatab.png)
 
+### Source Navigation
+
+Jump directly to the Lua source line for any highlighted set:
+
+`//gt open`
+
+or
+
+`//gt source`
+
+GearTree will open the file in your editor at the line where that set is defined.
+
+**Editor auto-detection order:**
+
+1. VS Code (if `code` is in your PATH)
+2. Notepad++ (if installed or in PATH)
+3. Sublime Text (if `subl` is in your PATH)
+4. Windows default `.lua` file association
+
+**To set a specific editor**, add `source_editor_command` to your settings file at:
+
+```
+Windower/addons/GearTree/data/settings.xml
+```
+
+Examples:
+
+```xml
+<source_editor_command>code -g "{file}:{line}"</source_editor_command>
+```
+
+```xml
+<source_editor_command>notepad++ -n{line} "{file}"</source_editor_command>
+```
+
+```xml
+<source_editor_command>subl "{file}:{line}"</source_editor_command>
+```
+
+Use `{file}` and `{line}` as placeholders. If the configured command fails, GearTree falls back to auto-detection.
+
+---
+
 ### Mouse and Keyboard Navigation
 
 Navigate using:
