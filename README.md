@@ -71,6 +71,17 @@ Attach notes to sets and folders for:
 * Future gear upgrades
 * Personal reminders
 
+GearTree also reads `--` comments written directly above a set in your Lua file and displays them automatically as **Lua Notes** on the set's summary. These are read-only — GearTree never modifies your source comments.
+
+For example, a set like this:
+
+```lua
+-- Main melee set. Swap head for Nyame once upgraded.
+sets.engaged = { ... }
+```
+
+will show that comment in the Notes section without any extra steps.
+
 ![Summary View](Images/Summarytab.png)
 
 ### Gear Inspection
