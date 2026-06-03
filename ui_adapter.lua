@@ -70,6 +70,24 @@ function adapter.get_position()
     return backend.get_position()
 end
 
+function adapter.set_scale(s)
+    if backend.set_scale then return backend.set_scale(s) end
+end
+
+function adapter.get_scale()
+    if backend.get_scale then return backend.get_scale() end
+    return 1.0
+end
+
+function adapter.set_opacity(pct)
+    if backend.set_opacity then return backend.set_opacity(pct) end
+end
+
+function adapter.get_opacity()
+    if backend.get_opacity then return backend.get_opacity() end
+    return 100
+end
+
 function adapter.set_equip_callback(callback)
     return backend.set_equip_callback(callback)
 end
@@ -224,6 +242,68 @@ function adapter.set_gear_reference_items(references)
     end
 end
 
+function adapter.set_mouse_mode(mode)
+    if backend.set_mouse_mode then
+        return backend.set_mouse_mode(mode)
+    end
+    return false
+end
+
+function adapter.get_mouse_mode()
+    if backend.get_mouse_mode then
+        return backend.get_mouse_mode()
+    end
+    return 'left'
+end
+
+function adapter.set_cursor_overlay(on)
+    if backend.set_cursor_overlay then
+        return backend.set_cursor_overlay(on)
+    end
+    return false
+end
+
+function adapter.get_cursor_overlay()
+    if backend.get_cursor_overlay then
+        return backend.get_cursor_overlay()
+    end
+    return false
+end
+
+function adapter.set_layout_mode(on)
+    if backend.set_layout_mode then return backend.set_layout_mode(on) end
+    return false
+end
+
+function adapter.get_layout_mode()
+    if backend.get_layout_mode then return backend.get_layout_mode() end
+    return false
+end
+
+function adapter.get_layout()
+    if backend.get_layout then return backend.get_layout() end
+    return {}
+end
+
+function adapter.set_layout(t)
+    if backend.set_layout then return backend.set_layout(t) end
+end
+
+function adapter.reset_layout()
+    if backend.reset_layout then return backend.reset_layout() end
+    return {}
+end
+
+function adapter.layout_lines()
+    if backend.layout_lines then return backend.layout_lines() end
+    return {}
+end
+
+function adapter.bounds_lines()
+    if backend.bounds_lines then return backend.bounds_lines() end
+    return {}
+end
+
 function adapter.on_mouse_move(mx, my)
     return backend.on_mouse_move(mx, my)
 end
@@ -242,6 +322,34 @@ end
 
 function adapter.on_scroll(mx, my, delta)
     return backend.on_scroll(mx, my, delta)
+end
+
+-- ── Theme switching pass-throughs ──────────────────────────────────────────
+-- These forward to the same-named functions in ui_facelift.lua.
+-- ui_notes_backend returns the facelift module directly so backend has them.
+
+function adapter.set_theme_name(name)
+    if backend.set_theme_name then return backend.set_theme_name(name) end
+    return false
+end
+
+function adapter.set_theme_dir(dir)
+    if backend.set_theme_dir then return backend.set_theme_dir(dir) end
+end
+
+function adapter.get_theme_name()
+    if backend.get_theme_name then return backend.get_theme_name() end
+    return 'unknown'
+end
+
+function adapter.list_themes()
+    if backend.list_themes then return backend.list_themes() end
+    return {}
+end
+
+function adapter.available_themes()
+    if backend.available_themes then return backend.available_themes() end
+    return {}
 end
 
 return adapter

@@ -422,6 +422,59 @@ function parser.parse(src)
 end
 
 ----------------------------------------------------------------------
+-- Nearby comment capture (read-only; never written back)
+----------------------------------------------------------------------
+
+-- Walk backwards from lhs_start in the *original* source (before strip_comments).
+-- Collects consecutive `-- ...` comment lines directly above the assignment.
+-- Stops immediately at any blank line or non-comment line.
+-- strip_comments replaces chars with spaces so byte offsets are identical; we
+-- can safely use lhs_start (computed against stripped src) as an index here.
+local function capture_comments_before(src, lhs_start)
+    -- Find the start of the assignment's own line.
+    local line_start = lhs_start
+    while line_start > 1 and src:sub(line_start - 1, line_start - 1) ~= '\n' do
+        line_start = line_start - 1
+    end
+
+    local comments = {}
+    local pos = line_start - 1  -- points at the '\n' ending the preceding line
+
+    while pos > 0 do
+        -- Find the start of this preceding line.
+        local ls = pos
+        while ls > 1 and src:sub(ls - 1, ls - 1) ~= '\n' do ls = ls - 1 end
+        local line = src:sub(ls, pos - 1)
+        local trimmed = line:match('^%s*(.-)%s*$')
+        if trimmed == '' then break end          -- blank line: stop
+        local text = trimmed:match('^%-%-%s?(.*)')
+        if text then
+            table.insert(comments, 1, text)      -- prepend to preserve order
+        else
+            break                                -- non-comment line: stop
+        end
+        pos = ls - 1
+    end
+
+    return #comments > 0 and comments or nil
+end
+
+-- Capture a trailing inline comment on the assignment's closing line.
+-- e.g.  sets.idle = { ... } -- idle refresh set
+local function capture_inline_comment(src, rhs_end)
+    local eol = rhs_end + 1
+    local n = #src
+    while eol <= n and src:sub(eol, eol) ~= '\n' do eol = eol + 1 end
+    local suffix = src:sub(rhs_end + 1, eol - 1)
+    local text = suffix:match('%-%-%s?(.*)')
+    if text then
+        text = text:gsub('%s+$', '')
+        if text ~= '' then return text end
+    end
+    return nil
+end
+
+----------------------------------------------------------------------
 -- Convenience: load and parse a file path
 ----------------------------------------------------------------------
 
@@ -437,6 +490,15 @@ function parser.parse_file(path)
         assignment.source_file = file_name
         if assignment.lhs_start and assignment.rhs_end then
             assignment.source_text = src:sub(assignment.lhs_start, assignment.rhs_end)
+            -- Capture nearby Lua comments from the original source (read-only).
+            local before = capture_comments_before(src, assignment.lhs_start)
+            local inline = capture_inline_comment(src, assignment.rhs_end)
+            if before or inline then
+                local lua_notes = {}
+                if before then for _, l in ipairs(before) do lua_notes[#lua_notes + 1] = l end end
+                if inline  then lua_notes[#lua_notes + 1] = inline end
+                assignment.lua_notes = lua_notes
+            end
         end
     end
     return assignments

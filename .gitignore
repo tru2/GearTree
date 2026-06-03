@@ -5,11 +5,6 @@ data/backups/
 data/notes/
 data/layouts/
 
-# Local AI assistant / handoff files
-CLAUDE.md
-AI_HANDOFF.md
-.claude/
-
 # Compiled Lua sources
 luac.out
 
@@ -37,7 +32,7 @@ luac.out
 *.def
 *.exp
 
-# Shared objects including Windows DLLs
+# Shared objects (inc. Windows DLLs)
 *.dll
 *.so
 *.so.*

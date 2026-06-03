@@ -175,12 +175,31 @@ local function append_wrapped(out, text, color)
     for raw in text:gmatch('(.-)\n') do append_one(raw) end
 end
 
+local function append_lua_notes_section_to_cards(cards, node)
+    if type(cards) ~= 'table' or type(cards.summary) ~= 'table' then return end
+    local lua_notes = node and node.assignment and node.assignment.lua_notes
+    if not lua_notes or #lua_notes == 0 then return end
+
+    local summary = cards.summary
+    append_line(summary, '', NOTE_TEXT_COLOR)
+    append_line(summary, 'Lua Notes', NOTE_HEADER_COLOR)
+    for _, line in ipairs(lua_notes) do
+        append_wrapped(summary, line, NOTE_TEXT_COLOR)
+    end
+
+    if cards.summary_only then
+        cards.gear = summary
+        cards.changes = summary
+        cards.evidence = summary
+    end
+end
+
 local function append_notes_section_to_cards(cards, node)
     if type(cards) ~= 'table' or type(cards.summary) ~= 'table' then return cards end
 
     local summary = cards.summary
     append_line(summary, '', NOTE_TEXT_COLOR)
-    append_line(summary, '== Notes ==', NOTE_HEADER_COLOR)
+    append_line(summary, 'Notes', NOTE_HEADER_COLOR)
 
     local note = note_for_node(node)
     if note == '' then
@@ -226,6 +245,12 @@ local function apply_augment_label_to_row(row, label)
     local left = item_width and text:sub(1, item_width) or text
     local right = item_width and text:sub(item_width + 1) or ''
 
+    -- Path/rank tags ([A/R5], [B/R20], [C], etc.) are set by augment_tag_for_row and have
+    -- the highest display priority. Never overwrite or append alongside them.
+    if left:match('%[[ABCD][^%]]*%]%s*$') then
+        return
+    end
+
     if left:find('%[aug[^%]]*%]') then
         left = left:gsub('%[aug[^%]]*%]', label, 1)
     else
@@ -248,12 +273,42 @@ local function first_augments_for_item_id(item_id)
     return nil
 end
 
+local function copies_are_heterogeneous(item_id)
+    if not item_id then return false end
+    local locations = backend_state
+        and backend_state.inventory_locations
+        and backend_state.inventory_locations.items_by_id
+        and backend_state.inventory_locations.items_by_id[item_id]
+    if type(locations) ~= 'table' or #locations < 2 then return false end
+    local first_key = nil
+    for _, location in ipairs(locations) do
+        local augs = location.augments or {}
+        local key = table.concat(augs, '\31')
+        if first_key == nil then
+            first_key = key
+        elseif key ~= first_key then
+            return true
+        end
+    end
+    return false
+end
+
 local function augment_hints_for_row(row)
     if not row or not row.text then return end
 
     local expected_augments = row.expected_augments or {}
     if has_augments(expected_augments) then
-        apply_augment_label_to_row(row, augment_label('aug'))
+        -- Case 2: Lua specifies augments, item ID matched, but equipped augments differ.
+        if row.id_match == true and row.augment_match == false and has_augments(row.equipped_augments) then
+            apply_augment_label_to_row(row, augment_label('aug!'))
+            local reason = tostring(row.status_reason or '')
+            if not reason:find('wrong augment', 1, true) then
+                row.status_reason = (reason ~= '' and (reason .. ' ') or '') ..
+                    'Item ID matched but equipped augments differ from Lua specification.'
+            end
+        else
+            apply_augment_label_to_row(row, augment_label('aug'))
+        end
         return
     end
 
@@ -265,11 +320,21 @@ local function augment_hints_for_row(row)
     end
 
     if has_augments(actual_augments) then
-        apply_augment_label_to_row(row, augment_label('aug?'))
+        -- actual_augments came from decoded extdata (equipped snapshot or inventory scan),
+        -- so the augment data is confirmed readable. Use [aug] not [aug?].
+        apply_augment_label_to_row(row, augment_label('aug'))
         local reason = tostring(row.status_reason or '')
         if not reason:find('augmented copy', 1, true) then
             row.status_reason = (reason ~= '' and (reason .. ' ') or '') ..
                 'Lua does not require augments, but an augmented copy was found.'
+        end
+    elseif copies_are_heterogeneous(row.expected_item_id) then
+        -- Case 4: No augment spec in Lua, multiple inventory copies have different augments.
+        apply_augment_label_to_row(row, augment_label('aug?'))
+        local reason = tostring(row.status_reason or '')
+        if not reason:find('multiple augmented', 1, true) then
+            row.status_reason = (reason ~= '' and (reason .. ' ') or '') ..
+                'Multiple copies with different augments exist; Lua does not specify which.'
         end
     end
 end
@@ -320,7 +385,8 @@ local function patch_preview_builder()
     local original_build_preview_cards = holder.value
     local function build_preview_cards_with_integrations(node)
         local cards = original_build_preview_cards(node)
-        append_notes_section_to_cards(cards, node)
+        append_lua_notes_section_to_cards(cards, node)   -- Lua source comments (read-only)
+        append_notes_section_to_cards(cards, node)        -- GearTree user notes (editable)
         add_augment_hints_to_cards(cards)
         return cards
     end
@@ -418,8 +484,9 @@ if original_register_event then
         if event_name == 'addon command' and type(callback) == 'function' then
             return original_register_event(event_name, function(cmd, ...)
                 if is_note_command(cmd) then return true end
+                -- Note: //gt note help is included in GearTree.lua's //gt help block.
+                -- print_note_help() is not appended here to avoid duplicating it.
                 local handled = callback(cmd, ...)
-                if is_help_command(cmd) then print_note_help() end
                 return handled
             end)
         end

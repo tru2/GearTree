@@ -42,7 +42,7 @@ end
 local function item_augments(item)
     local ok, decoded = pcall(extdata.decode, item)
     if not ok or not decoded or type(decoded.augments) ~= 'table' then
-        return {}, false
+        return {}, false, nil, nil, nil
     end
 
     local out = {}
@@ -52,7 +52,7 @@ local function item_augments(item)
             out[#out + 1] = augment
         end
     end
-    return out, true
+    return out, true, decoded.path, decoded.rank, decoded.augment_system
 end
 
 local function make_empty(slot)
@@ -62,7 +62,7 @@ end
 local function make_item(slot, item, bag, index)
     local name = item_name(item)
     if not name then return make_empty(slot) end
-    local augments, augments_available = item_augments(item)
+    local augments, augments_available, aug_path, aug_rank, augment_system = item_augments(item)
     return {
         slot = slot,
         name = name,
@@ -72,6 +72,9 @@ local function make_item(slot, item, bag, index)
         index = index,
         augments = augments,
         augments_available = augments_available,
+        aug_path = aug_path,
+        aug_rank = aug_rank,
+        augment_system = augment_system,
     }
 end
 

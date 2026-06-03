@@ -1,40 +1,64 @@
 # Changelog
 
-## 0.3.0 - Release Candidate
+## 0.4.0
 
 ### Added
 
-- Organized tree view for friendlier browsing of common GearSwap set patterns.
-- Raw Lua tree mode for debugging exact Lua structure.
-- Gear preview cards with Summary, Gear, Changes, and Data tabs.
-- Source path and source-line visibility for parsed sets.
-- `//gt open` support to jump near the selected Lua set in an editor/default app.
-- `//gt save` workflow for saving changed equipped slots back into the highlighted set.
-- `//gt saveslot <slot>` for force-saving one equipped slot.
-- `//gt undo` for restoring the most recent GearTree save backup.
-- Personal notes on gear sets, categories, and virtual folders.
-- `== Notes ==` section in Summary/category previews.
-- Simple augment tags in the Gear tab:
-  - `[aug]` when Lua explicitly lists augments.
-  - `[aug?]` when Lua does not list augments but GearTree finds an augmented copy.
-- Virtual display folders with make, move, rename, remove, unmove, and layout reset commands.
-- Find command for jumping to matching sets, folders, or gear lines.
-- In-game help updates for notes and newer commands.
+- Mouse navigation and interaction support.
+- Visual cursor overlay for easier mouse navigation.
+- Personal notes for gear sets and folders.
+- Virtual folders and custom display organization.
+- Source-file navigation for jumping to the selected set in the Lua file.
+- UI opacity controls.
+- Whole-addon UI scaling controls.
+- Shift+Arrow navigation mode for users who want to reserve normal arrow keys for FFXI.
+- Expanded help system with separate player and developer help.
 
-### Changed
+### Improved
 
-- Organized tree is now the default display mode.
-- Backup retention is limited to the latest 5 backups per Lua file.
-- Augment display was intentionally kept simple and reliable; rank/path labels are not shown.
-- README updated for public release preparation.
+- Major UI refresh with updated theme visuals and cleaner panel layout.
+- Organized Tree view improved with clearer gameplay-focused categories.
+- Improved gear comparison and status display.
+- Improved inventory and wardrobe location detection.
+- Improved save workflow for writing equipped gear back into GearSwap sets.
+- Improved preview panels and information presentation.
+- Improved keyboard navigation throughout the addon.
+- Improved command organization and help documentation.
+- Improved theme asset handling and UI consistency.
+- Improved layout persistence and customization options.
 
-### Safety / Limitations
+### Saving & Safety
 
-- GearTree only writes when a save command is explicitly run.
-- GearTree creates a backup before each successful write.
-- Unsupported or dynamic set shapes are refused instead of guessed.
-- If Lua does not specify augments, GearTree cannot know which augmented copy was intended.
-- GearTree parses Lua as text and does not execute GearSwap logic.
+- Automatic backup creation before every successful write.
+- Undo support for restoring the most recent GearTree save.
+- Improved write validation and safety checks.
+- Improved handling of unsupported set structures.
+
+### Notes & Organization
+
+- Added note support for both gear sets and folders.
+- Added custom folder creation and management.
+- Added item movement, reordering, renaming, and layout management tools.
+- Added layout reset functionality.
+
+### GearSwap Integration
+
+- Improved GearSwap file parsing.
+- Improved support for common GearSwap assignment patterns.
+- Improved set detection and navigation.
+- Improved reload and refresh workflows after saves.
+
+### Fixes
+
+- Numerous UI alignment and navigation fixes.
+- Multiple tree navigation fixes.
+- Multiple save and reload workflow fixes.
+- Various parser, writer, and display fixes.
+- General stability and usability improvements throughout the addon.
+
+## 0.3.0 - Release Candidate
+
+- First public release candidate.
 
 ## 0.2.x
 

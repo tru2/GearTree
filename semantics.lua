@@ -4,6 +4,8 @@
 
 local semantics = {}
 
+local set_intent = require('set_intent')
+
 local function normalize_token_key(value)
     local key = tostring(value or ''):lower()
     key = key:gsub('&', 'and')
@@ -747,6 +749,8 @@ local function content_route_for_keys(keys, inheritance)
         return route_info(route_parts('Magic', 'Midcast'), 'Spellcasting Sets', 'content heuristic', 'midcast fallback', 'Magic -> Midcast', { 'Content heuristic: generic midcast' })
     elseif k2 == 'TreasureHunter' then
         return route_info(route_parts('Overlays / Modifiers', 'Treasure Hunter'), 'Loot / Tagging Overlay', 'raw path', 'TreasureHunter path', 'Treasure Hunter tagging', { 'Raw path: TreasureHunter' })
+    elseif contains_any(k2, { 'Nuke', 'Nuking', 'Elemental', 'Aero', 'Wind', 'Fire', 'Blizzard', 'Ice', 'Thunder', 'Stone', 'Earth', 'Water' }) then
+        return route_info(route_parts('Magic', 'Elemental / Nuking'), 'Nuking / Elemental Sets', 'content heuristic', 'custom top-level nuke/elemental name', 'Elemental Magic', { 'Content heuristic: custom top-level nuke/elemental name' })
     elseif is_movement_key(k2) then
         return route_info(route_parts('Current State', 'Movement'), 'Movement / Travel Sets', 'raw path', 'movement path', 'Movement / Kiting mode', { 'Raw path: movement' })
     elseif k2 == 'Knockback' then
@@ -809,6 +813,19 @@ local function classify_organized(node_or_assignment)
     local content = content_route_for_keys(keys, inheritance)
     if content then
         return finish(content)
+    end
+
+    local intent_result = set_intent.classify(node_or_assignment)
+    if intent_result then
+        local dbg = intent_result.evidence_lines or {}
+        return finish(route_info(
+            intent_result.route,
+            intent_result.category,
+            'gear/stat evidence',
+            'set_intent: ' .. (intent_result.intent or 'unknown'),
+            intent_result.trigger,
+            dbg
+        ))
     end
 
     return finish(route_info(route_parts('Other', 'Uncategorized'), 'Miscellaneous / Custom Sets', 'fallback', 'no strong path or helper match', 'Unknown', { 'Fallback: no strong semantic match' }))

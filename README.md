@@ -16,6 +16,26 @@ GearTree is meant to help players understand, test, clean up, and maintain big G
 
 ---
 
+## Features
+
+- Organized and Raw GearSwap tree views
+- One-click set equipping from the UI
+- Save equipped gear changes back into GearSwap sets
+- Undo the most recent save
+- Personal notes for sets and folders
+- Virtual folders and custom display organization
+- Gear status and equipment comparison in the preview pane
+- Inventory and wardrobe location detection
+- Mouse and keyboard navigation
+- Optional Shift+Arrow navigation mode (frees plain arrows for FFXI)
+- Visual cursor overlay, on by default
+- Window opacity control
+- Whole-addon UI scaling (0.75×–2.0×)
+- Source-file navigation (jump to the Lua line of the selected set)
+- Automatic backup before every write
+
+---
+
 ## Install
 
 1. Copy the whole `GearTree` folder into:
@@ -75,10 +95,6 @@ Esc         Hide GearTree
 //gt note
 //gt note clear
 //gt find <text>
-//gt status
-//gt edit [on|off|toggle]
-//gt load <path>
-//gt auto
 //gt mode [raw|organized|toggle]
 //gt make <folder> [root]
 //gt move <set> to <folder>
@@ -91,10 +107,16 @@ Esc         Hide GearTree
 //gt layout reset
 //gt expandall | collapseall
 //gt pos [x y]
-//gt augdebug
-//gt debugslot <slot>
+//gt opacity [35-100|reset]
+//gt scale [0.75-2.0|reset]
+//gt mouse [on|off|status]
+//gt shift [on|off|status]
+//gt cursor [on|off|status]
 //gt help
+//gt devhelp
 ```
+
+Advanced diagnostic and developer commands are available through `//gt devhelp`.
 
 ### Useful commands
 
@@ -146,6 +168,46 @@ Opens the highlighted Lua set near its source line, when possible.
 ```
 
 Switches between the raw Lua tree and the organized tree.
+
+---
+
+## Interface customization
+
+### Opacity
+
+Controls how transparent the GearTree window background is. Text remains fully readable at all settings.
+
+```lua
+//gt opacity 85
+```
+
+Sets window opacity to 85%. The valid range is 35–100 (100 is fully opaque, the default).
+
+```lua
+//gt opacity reset
+```
+
+Returns opacity to 100%.
+
+### UI scaling
+
+Scales the entire GearTree interface uniformly — panel size, row height, font size, tab row, hitboxes, and cursor overlay all change together.
+
+```lua
+//gt scale 1.25
+```
+
+Sets the scale to 1.25×. The valid range is 0.75–2.0 (1.0 is the default).
+
+```lua
+//gt scale reset
+```
+
+Returns the scale to 1.0.
+
+### Cursor overlay
+
+GearTree shows a small visual pointer while the mouse is inside the addon window. It is on by default and can be toggled with `//gt cursor on/off/status`.
 
 ---
 
@@ -329,5 +391,19 @@ GearTree/
 ├── snapshot.lua        - Current equipment/inventory snapshots
 ├── writer.lua          - Safe Lua file patching and backups
 ├── layout.lua          - Virtual folder/reorder layout storage
+├── themes/jeuno/       - Default visual theme assets
 └── README.md
 ```
+
+---
+
+## Contributing
+
+Developer documentation lives in [`docs/dev/`](docs/dev/):
+
+- `CONTEXT.md` — architecture overview
+- `PROJECT_MAP.md` — file ownership map
+- `THEME_SYSTEM.md` — theme asset and rendering rules
+- `UI_PIXEL_OWNERSHIP.md` — UI layer ownership contract
+- `CLAUDE.md` — AI session context and coding rules
+- `FFXI_ADDON_DEVELOPER_SKILL.md` — Windower API reference

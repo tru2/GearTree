@@ -77,6 +77,7 @@ local FOLDER_ORDER = {
         'Defensive',
         'Treasure Hunter',
         'Magic Burst',
+        'Elemental Affinity',
         'Max TP',
         'Job Buffs',
         'Self / Received Effects',
@@ -86,6 +87,7 @@ local FOLDER_ORDER = {
         'Doom',
         'Sleep',
         'Weakness',
+        'Reraise',
         'Status / Emergency',
     }),
     ['Weapons'] = order_map({
@@ -354,6 +356,17 @@ local function unique_leaf_key(parent, label, assignment)
 end
 
 local function add_leaf(parent, label, assignment)
+    -- If the label collides with an existing non-gear folder, redirect this set
+    -- inside that folder rather than appending a "(line N)" suffix at parent level.
+    -- Handles the common pattern where a named set shares its label with a category
+    -- folder (e.g. sets.Reraise placed alongside a Reraise subfolder).
+    local folder_collision = parent.child_map[label]
+    if folder_collision and not folder_collision.has_gear and #folder_collision.children > 0 then
+        local keys = assignment.keys
+        local inner_label = tostring(keys[#keys] or label)
+        return add_leaf(folder_collision, inner_label, assignment)
+    end
+
     local key = unique_leaf_key(parent, label, assignment)
     local existing = parent.child_map[key]
     if existing and existing.has_gear and keys_equal(existing.path, assignment.keys) then
@@ -382,26 +395,122 @@ end
 
 local function trim_redundant_terminal_folder(route_parts, label)
     if #route_parts == 0 then return route_parts end
-    if normalize_display_key(route_parts[#route_parts]) == normalize_display_key(label) then
+    -- Exact string match only: 'Max TP' and 'MaxTP' are distinct, so sets.MaxTP
+    -- correctly nests inside the Max TP folder rather than appearing as a sibling.
+    if route_parts[#route_parts] == label then
         table.remove(route_parts, #route_parts)
     end
     return route_parts
 end
 
 local function prune_empty_folders(node)
-    if not node or not node.children then return false end
+    if not node or not node.children then return end
 
-    for i = #node.children, 1, -1 do
-        local child = node.children[i]
-        if prune_empty_folders(child) then
-            table.remove(node.children, i)
-            if node.child_map then
-                node.child_map[child.key] = nil
+    -- Returns true when this node is, or contains, at least one real gear set.
+    -- Children with no real gear descendants are removed in-place so that
+    -- category descriptions, labels, or metadata nodes never count as content.
+    local function has_real_set(n)
+        -- A node with has_gear or an assignment is a real set — keep it immediately.
+        if n.has_gear == true or n.assignment ~= nil then
+            return true
+        end
+        -- Folder: recurse and drop children with no real gear anywhere under them.
+        for i = #n.children, 1, -1 do
+            local child = n.children[i]
+            if not has_real_set(child) then
+                table.remove(n.children, i)
+                if n.child_map then n.child_map[child.key] = nil end
             end
         end
+        -- Keep this folder only when at least one child survived.
+        return #n.children > 0
     end
 
-    return node.organized == true and not node.has_gear and #node.children == 0
+    -- Apply to root's children only; the root itself is never removed.
+    for i = #node.children, 1, -1 do
+        local child = node.children[i]
+        if not has_real_set(child) then
+            table.remove(node.children, i)
+            if node.child_map then node.child_map[child.key] = nil end
+        end
+    end
+end
+
+-- Inject a 'Base' child node carrying the given gear assignment into
+-- parent_node.  Called when a WS parent that holds direct gear gains
+-- its first child variant so the base set stays separately selectable.
+local function inject_base_child(parent_node, gear_assignment)
+    if parent_node.child_map['Base'] then return end
+    local base = new_node('Base', copy_path(gear_assignment.keys))
+    base.assignment   = gear_assignment
+    base.has_gear     = true
+    base.organized_leaf = true
+    table.insert(parent_node.children, 1, base)
+    parent_node.child_map['Base'] = base
+end
+
+-- Special-case placement for sets.precast.WS paths.
+--
+-- Global helper variants (depth 4: sets.precast.WS[k4]) land flat under
+-- Weapon Skills when they have no child variants.
+--
+-- Named-WS sets that have both direct gear AND child variants get a 'Base'
+-- child injected so the base set remains separately selectable.  The parent
+-- k4 node becomes a folder-only node (has_gear=false) and never pretends to
+-- be an equipable set.
+--
+-- Processing-order safe:
+--   • Depth-4 first, depth-5 later: depth-4 creates gear leaf; when the
+--     first depth-5 arrives, Base is injected and parent is demoted.
+--   • Depth-5 first, depth-4 later: placeholder folder is created for k4;
+--     when depth-4 arrives and the folder already has children, Base is
+--     injected for the depth-4 set instead of upgrading the folder directly.
+local function place_ws_leaf(ws_folder, assignment)
+    local keys = assignment.keys
+    local k4   = keys[4]
+
+    if #keys == 3 then
+        -- sets.precast.WS → Base WS, flat under Weapon Skills.
+        add_leaf(ws_folder, 'Base WS', assignment)
+
+    elseif #keys == 4 then
+        -- sets.precast.WS[k4]: named WS base set.
+        local existing = ws_folder.child_map[k4]
+        if existing and not existing.has_gear then
+            if #existing.children > 0 then
+                -- Placeholder folder already has variant children (depth-5 arrived
+                -- first).  Inject a Base child for this set instead of upgrading
+                -- the folder, so the base set is separately selectable.
+                inject_base_child(existing, assignment)
+            else
+                -- Empty placeholder; upgrade it in-place (no variants yet).
+                existing.has_gear     = true
+                existing.assignment   = assignment
+                existing.path         = assignment.keys
+                existing.organized_leaf = true
+            end
+        else
+            add_leaf(ws_folder, k4, assignment)
+        end
+
+    else
+        -- sets.precast.WS[k4].<variant...>: nest under the k4 parent.
+        local ws_parent = ws_folder.child_map[k4]
+        if not ws_parent then
+            ws_parent = ensure_folder(ws_folder, k4)
+        end
+        -- If the parent already carries direct gear, demote it to a folder
+        -- and inject a 'Base' child so the base gear remains selectable.
+        if ws_parent.has_gear then
+            if not ws_parent.child_map['Base'] then
+                inject_base_child(ws_parent, ws_parent.assignment)
+                ws_parent.has_gear      = false
+                ws_parent.assignment    = nil
+                ws_parent.organized_leaf = false
+            end
+        end
+        add_leaf(ws_parent, join_from(keys, 5), assignment)
+    end
 end
 
 function organized_tree.build_organized_tree(assignments)
@@ -409,13 +518,21 @@ function organized_tree.build_organized_tree(assignments)
     local root = new_node('Gear Sets', { 'sets' })
     for _, assignment in ipairs(assignments or {}) do
         if has_direct_gear_slots(assignment) then
-            local parent = root
-            local label = organized_tree.leaf_label(assignment)
-            local route_parts = trim_redundant_terminal_folder(organized_tree.get_organized_route(assignment), label)
-            for _, folder in ipairs(route_parts) do
-                parent = ensure_folder(parent, folder)
+            local keys = assignment.keys
+            if keys[2] == 'precast' and keys[3] == 'WS' then
+                -- WS paths use dedicated nesting so named-WS nodes can hold
+                -- both an assignment and variant children.
+                local ws_folder = ensure_folder(ensure_folder(root, 'Actions'), 'Weapon Skills')
+                place_ws_leaf(ws_folder, assignment)
+            else
+                local parent = root
+                local label = organized_tree.leaf_label(assignment)
+                local route_parts = trim_redundant_terminal_folder(organized_tree.get_organized_route(assignment), label)
+                for _, folder in ipairs(route_parts) do
+                    parent = ensure_folder(parent, folder)
+                end
+                add_leaf(parent, label, assignment)
             end
-            add_leaf(parent, label, assignment)
         end
     end
     prune_empty_folders(root)

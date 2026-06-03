@@ -329,17 +329,23 @@ local function is_descendant(node, possible_parent)
     return false
 end
 
-local function prune_empty_virtual_folders(node)
+local function prune_empty_display_folders(node)
     if not node or not node.children then return false end
 
     for i = #node.children, 1, -1 do
         local child = node.children[i]
-        if prune_empty_virtual_folders(child) then
+        if prune_empty_display_folders(child) then
             table.remove(node.children, i)
         end
     end
 
-    return node.virtual == true and not node.has_gear and #node.children == 0
+    -- Real gear-set nodes are always kept.
+    if node.has_gear == true or node.assignment ~= nil then return false end
+    -- Root (no parent pointer set by rebuild) is always kept.
+    if not node.parent then return false end
+    -- Any display folder — virtual user folder or organized category folder —
+    -- with no real gear descendants is removed.
+    return #node.children == 0
 end
 
 local function apply_order(parent, ref, root)
@@ -410,7 +416,7 @@ function layout.apply(root)
     end
 
     rebuild(root, nil)
-    prune_empty_virtual_folders(root)
+    prune_empty_display_folders(root)
     rebuild(root, nil)
     walk(root, function(node)
         apply_order(node, node_ref(node, root), root)

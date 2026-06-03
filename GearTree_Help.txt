@@ -1,8 +1,8 @@
 GearTree Commands
 =================
 
-General
--------
+Basic Commands
+--------------
 //gt show | on
     Show the GearTree window.
 
@@ -13,158 +13,201 @@ General
     Toggle GearTree visibility.
 
 //gt reload | r
-    Re-parse and rebuild the currently loaded gear file.
-
-//gt status
-    Show loaded file, tree mode, selected set, unresolved refs,
-    and unsaved changes.
+    Re-parse and rebuild the currently loaded GearSwap file.
 
 //gt help | ?
-    Show command help.
+    Show player command help.
+
+//gt devhelp
+    Show developer and diagnostic commands.
 
 
-Loading / Tree Modes
---------------------
-//gt auto
-    Auto-detect the current job GearSwap file.
-
-//gt load <path>
-    Load a specific GearSwap Lua file.
-
-//gt mode <raw|organized|toggle>
-//gt tree <raw|organized|toggle>
-//gt view <raw|organized|toggle>
-    Change tree display mode.
-
+Views
+-----
+//gt mode raw
 //gt raw
-    Switch directly to raw Lua tree mode.
+    Display sets closer to the actual GearSwap Lua structure.
 
+//gt mode organized
 //gt organized
 //gt organised
-    Switch directly to semantic/organized mode.
+    Display sets in organized gameplay categories.
+
+//gt mode toggle
+    Toggle between Raw and Organized views.
+
+//gt expandall
+    Expand all folders and categories.
+
+//gt collapseall
+    Collapse all folders and categories.
 
 
-Editing / Saving
-----------------
-//gt edit [on|off|toggle]
-    Enable or disable live edit mode.
-    When enabled, highlighting sets auto-equips them and tracks changes.
+Navigation
+----------
+//gt find <text>
+    Jump to a matching set, folder, or gear item.
 
-//gt save
-    Save changed equipped slots into the currently highlighted set.
+//gt up
+//gt down
+    Move selection up or down.
 
-//gt saveslot <slot>
-    Force-save only the currently equipped item for one slot.
+//gt expand
+    Expand the selected folder or category.
 
-//gt undo
-    Restore the backup from the last GearTree save.
+//gt back
+    Collapse or move back from the selected entry.
+
+//gt select
+    Select the highlighted entry.
+
+//gt equip
+    Equip the highlighted gear set.
 
 //gt last
     Jump back to the last saved set.
 
 
-Source / Debug
---------------
-//gt open
-//gt source
-    Open the highlighted set in your editor near its Lua source line.
+Saving & Editing
+----------------
+//gt save
+    Save changed equipped gear back into the selected set.
 
-//gt augdebug
-//gt debugaug
-    Print detailed augment comparison/debug information
-    for the selected gear row.
+//gt saveslot <slot>
+    Save only the currently equipped item for one slot.
 
-//gt debugslot <slot>
-    Print expected/equipped/storage details for a specific slot.
+//gt undo
+    Restore the most recent GearTree save backup.
 
 
-Search / Navigation
--------------------
-//gt find <text>
-    Jump to a matching set, folder, or gear line.
+Notes
+-----
+//gt note <text>
+    Save a personal note on the selected set or folder.
 
-//gt up
-//gt down
-    Move tree selection up or down.
+//gt note
+    Display the current note.
 
-//gt expand
-    Expand the selected node/folder.
-
-//gt back
-    Collapse or move back from the selected node.
-
-//gt select
-    Select the highlighted node.
-
-//gt equip
-    Equip the currently highlighted set.
+//gt note clear
+    Remove the current note.
 
 
-Folders / Layout
+Folders & Layout
 ----------------
 //gt make <folder> [root]
-    Create a virtual display folder.
+    Create a display folder.
 
 //gt move <set> to <folder>
-    Move a set into a virtual folder.
+    Move a set into a display folder.
 
 //gt move [set] up|down|top|bottom
     Reorder display items.
 
 //gt move here
-    Move the last saved set into the currently highlighted virtual folder.
+    Move the last saved set into the selected folder.
 
 //gt rename <new>
 //gt rename <folder> to <new>
-    Rename a virtual folder.
+    Rename a folder or display item.
 
 //gt remove [folder]
-    Remove a virtual folder.
+    Remove a display folder.
 
 //gt unmove [set]
-    Return a moved set to its original Lua location/order.
+    Return a moved set to its original location.
 
 //gt layout reset
-    Reset all virtual folder/layout changes back to Lua defaults.
+    Reset all display layout changes.
 
 
-Display
--------
-//gt expandall
-    Expand all tree nodes.
+Interface Settings
+------------------
+//gt pos
+    Show the current window position.
 
-//gt collapseall
-    Collapse all tree nodes.
+//gt pos <x> <y>
+    Move the window.
 
-//gt pos [x y]
-    Show or set GearTree window position.
+//gt opacity
+    Display the current opacity setting.
+
+//gt opacity <35-100>
+    Set window opacity. 100 is fully opaque.
+
+//gt opacity reset
+    Restore default opacity.
+
+//gt scale
+    Display the current UI scale.
+
+//gt scale <0.75-2.0>
+    Resize the whole GearTree window.
+
+//gt scale reset
+    Restore default UI scale.
+
+//gt mouse on
+//gt mouse off
+    Enable or disable left-click activation.
+
+//gt mouse status
+    Display current mouse mode.
+
+//gt shift on
+//gt shift off
+    Enable or disable Shift+Arrow navigation.
+
+//gt shift status
+    Display current keyboard navigation mode.
+
+//gt cursor on
+//gt cursor off
+    Show or hide the visual pointer inside GearTree.
+
+//gt cursor status
+    Display current pointer setting.
 
 
 Keyboard Controls
 -----------------
 Up / Down
-    Navigate tree or scroll active tab.
-
-Right
-    Expand node or switch tab.
+    Navigate the tree or scroll the active preview tab.
 
 Left
-    Collapse node or go back.
+    Collapse folders or move back.
+
+Right
+    Expand folders or move forward.
 
 End
-    Equip highlighted set.
+    Equip the selected set.
 
 Esc
-    Close GearTree window.
+    Close GearTree.
+
+Shift + Arrow Keys
+    Used for GearTree navigation when //gt shift on is enabled.
 
 
 Mouse Controls
 --------------
-Left-click
-    Expand/select/equip rows.
+Left Click
+    Select, expand, or equip entries when mouse mode is on.
 
-Right-click
-    Open preview/source/gear details.
+Right Click
+    Open previews and details.
 
-Drag title bar
-    Move window.
+Mouse Wheel
+    Scroll content.
+
+Drag Header
+    Move the window.
+
+
+Developer / Diagnostic Commands
+-------------------------------
+Developer and diagnostic commands are hidden from normal help.
+Use:
+
+//gt devhelp
+    Show debug, source, theme, calibration, and diagnostic commands.

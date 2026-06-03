@@ -3,7 +3,7 @@
     <name>GearTree</name>
     <description>Clickable tree and editor for Gearswap sets.</description>
     <author>Tru + Codex</author>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
     <commands>
         <command>
             <name>geartree, gt</name>

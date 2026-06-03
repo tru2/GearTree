@@ -4,7 +4,7 @@
 
 _addon.name    = 'GearTree'
 _addon.author  = 'Tru + Codex'
-_addon.version = '0.3.0'
+_addon.version = '0.4.0'
 _addon.commands = { 'geartree', 'gt' }
 
 require('logger')
@@ -20,6 +20,7 @@ local writer   = require('writer')
 local gear_slots = require('gear_slots')
 local res     = require('resources')
 local extdata = require('extdata')
+local category_debug = require('category_debug')
 
 ----------------------------------------------------------------------
 -- Settings (persisted to /addons/GearTree/data/settings.xml)
@@ -30,11 +31,14 @@ local defaults = {
     pos_y = 100,
     width = 260,
     visible_rows = 22,
+    ui_scale = 1.0,
     auto_load = true,
     -- Organized is the normal/user-friendly view. Raw remains available
     -- with //gt mode raw for debugging exact Lua structure.
     tree_mode = 'organized',
     edit_mode = true,
+    -- When true, plain arrow keys pass through to FFXI and Shift+Arrow controls GearTree.
+    shift_arrow_nav = false,
     last_set_path = '',
     last_undo_backup = '',
     last_undo_file = '',
@@ -50,6 +54,52 @@ local defaults = {
     --   notepad++ -n{line} "{file}"
     --   subl "{file}:{line}"
     source_editor_command = '',
+    -- Mouse activation: 'on' (default) = left click activates rows/tabs.
+    -- 'off' = hover only; keyboard navigation is the interaction method.
+    mouse_mode = 'on',
+    -- Visual-only ornate cursor overlay drawn at the mouse while GearTree is
+    -- visible.  Uses cursor.png from the active theme when present, otherwise
+    -- falls back to a primitive crosshair.  Does not affect click behavior.
+    cursor_overlay = true,
+    -- Active visual theme.  Names map to subfolders under themes/.
+    theme = 'jeuno',
+    -- Global window opacity: 35-100 (100 = fully opaque).  Scales all background
+    -- and frame elements while leaving text fully readable.
+    opacity = 100,
+    -- When false (default during UI cleanup), saved layout values in settings.xml
+    -- are ignored on load and //gt calib save is a no-op.  Set true to re-enable
+    -- persistence once the layout is stable.
+    layout_calibration_enabled = false,
+    -- Layout calibration metrics (edited via //gt calib).  Defaults match the
+    -- renderer's built-in values, so an empty/missing table changes nothing.
+    -- Old saved tables missing the newer keys simply fall back to these defaults.
+    layout = {
+        chrome_inset    = 6,
+        content_top_pad = 10,
+        header_x_offset = 0,
+        header_y_offset = 0,
+        header_w_adjust = 0,
+        header_h_adjust = 0,
+        header_text_x_offset = 0,
+        header_text_y_offset = 0,
+        tab_x_offset    = 0,
+        tab_y_offset    = 0,
+        tab_w_adjust    = 0,
+        tab_h_adjust    = 0,
+        tab_right_trim  = 0,
+        preview_tab_text_x_offset = 0,
+        preview_tab_text_y_offset = 0,
+        tree_header_text_x_offset = 0,
+        tree_header_text_y_offset = 0,
+        content_x_offset = 0,
+        content_w_adjust = 0,
+        footer_x_offset = 0,
+        footer_y_offset = 2,
+        footer_w_adjust = 0,
+        footer_h_adjust = 0,
+        footer_text_x_offset = 0,
+        footer_text_y_offset = 0,
+    },
 }
 
 local settings = config.load(defaults)
@@ -64,6 +114,7 @@ local current_assignments = {}
 local current_gear_references = {}
 local baselines = {}
 local edit_mode = settings.edit_mode ~= false
+local shift_arrow_nav = settings.shift_arrow_nav == true
 local active_edit_path = nil
 local active_edit_node = nil
 local last_auto_equip_path = nil
@@ -159,23 +210,33 @@ local function run_nav_repeat_action(action)
     end
 end
 
+
 local function bind_nav_keys()
     if nav_keys_bound then return end
-    windower.send_command('bind ' .. NAV_KEYS.up     .. ' gt up')
-    windower.send_command('bind ' .. NAV_KEYS.down   .. ' gt down')
-    windower.send_command('bind ' .. NAV_KEYS.expand .. ' gt expand')
-    windower.send_command('bind ' .. NAV_KEYS.back   .. ' gt back')
-    windower.send_command('bind ' .. NAV_KEYS.equip  .. ' gt equip')
-    windower.send_command('bind ' .. NAV_KEYS.close  .. ' gt hide')
+    -- shift_arrow_nav on: bind ~arrow (Windower Shift modifier) so plain arrows pass through.
+    -- shift_arrow_nav off: bind plain arrows as normal.
+    local p = shift_arrow_nav and '~' or ''
+    windower.send_command('bind ' .. p .. NAV_KEYS.up     .. ' gt up')
+    windower.send_command('bind ' .. p .. NAV_KEYS.down   .. ' gt down')
+    windower.send_command('bind ' .. p .. NAV_KEYS.expand .. ' gt expand')
+    windower.send_command('bind ' .. p .. NAV_KEYS.back   .. ' gt back')
+    windower.send_command('bind ' .. NAV_KEYS.equip .. ' gt equip')
+    windower.send_command('bind ' .. NAV_KEYS.close .. ' gt hide')
     nav_keys_bound = true
 end
 
 local function unbind_nav_keys()
     if not nav_keys_bound then return end
-    windower.send_command('unbind ' .. NAV_KEYS.up)
-    windower.send_command('unbind ' .. NAV_KEYS.down)
-    windower.send_command('unbind ' .. NAV_KEYS.expand)
-    windower.send_command('unbind ' .. NAV_KEYS.back)
+    -- Defensively unbind both plain and Shift-modified arrow variants so a
+    -- mode toggle or reload never leaves stale binds in Windower.
+    windower.send_command('unbind up')
+    windower.send_command('unbind down')
+    windower.send_command('unbind right')
+    windower.send_command('unbind left')
+    windower.send_command('unbind ~up')
+    windower.send_command('unbind ~down')
+    windower.send_command('unbind ~right')
+    windower.send_command('unbind ~left')
     windower.send_command('unbind ' .. NAV_KEYS.equip)
     windower.send_command('unbind ' .. NAV_KEYS.close)
     clear_nav_repeat()
@@ -453,7 +514,7 @@ end
 local function inventory_item_augments(item)
     local ok, decoded = pcall(extdata.decode, item)
     if not ok or not decoded or type(decoded.augments) ~= 'table' then
-        return {}, false
+        return {}, false, nil, nil, nil
     end
 
     local out = {}
@@ -463,7 +524,7 @@ local function inventory_item_augments(item)
             out[#out + 1] = augment
         end
     end
-    return out, true
+    return out, true, decoded.path, decoded.rank, decoded.augment_system
 end
 
 local function max_bag_index(bag)
@@ -544,13 +605,16 @@ local function scan_inventory_locations(force)
                     if name then
                         local key = normalize_item_name(name)
                         locations.items[key] = locations.items[key] or {}
-                        local augments, augments_available = inventory_item_augments(item)
+                        local augments, augments_available, aug_path, aug_rank, augment_system = inventory_item_augments(item)
                         local entry = {
                             id = item.id,
                             name = name,
                             extdata = item.extdata,
                             augments = augments,
                             augments_available = augments_available,
+                            aug_path = aug_path,
+                            aug_rank = aug_rank,
+                            augment_system = augment_system,
                             bag = def.id,
                             index = index,
                             label = def.label,
@@ -964,23 +1028,30 @@ local function clear_inventory_locations()
     end
 end
 
+-- Re-capture current equipment and refresh the Gear tab display.
+-- Called automatically after equipping a set (at 1s, 3s, 6s) and on
+-- demand via //gt snap.  Does not update the save baseline.
+local function refresh_equipment_display(path)
+    if active_edit_path ~= path then return end
+    local later = snapshot.capture()
+    if later then
+        publish_current_equipment(path, later)
+        refresh_inventory_locations(false)
+    end
+end
+
 local function capture_baseline_for(node)
     local path = tree.path_string(node)
     active_edit_path = path
     active_edit_node = node
     next_live_check_at = 0
+    -- First capture at 1s: stores the save baseline and seeds the display.
     coroutine.schedule(function()
+        if active_edit_path ~= path then return end
         local shot, err = snapshot.capture()
         if shot then
             baselines[path] = shot
             publish_current_equipment(path, shot)
-            coroutine.schedule(function()
-                if active_edit_path ~= path then return end
-                local later = snapshot.capture()
-                if later then
-                    publish_current_equipment(path, later)
-                end
-            end, 1.5)
             refresh_inventory_locations(true)
             if active_edit_path == path then
                 publish_changes(path, shot, {}, 0)
@@ -990,6 +1061,98 @@ local function capture_baseline_for(node)
             gt_chat(CHAT.error, 'Could not capture edit baseline: ' .. (err or 'unknown error'))
         end
     end, 1)
+    -- Two follow-up display refreshes at 3s and 6s so the Gear tab
+    -- reflects post-equip state even when GearSwap or the server is slow.
+    coroutine.schedule(function() refresh_equipment_display(path) end, 3)
+    coroutine.schedule(function() refresh_equipment_display(path) end, 6)
+end
+
+-- ── Paired-slot equip retry ──────────────────────────────────────────────────
+-- FFXI/GearSwap cannot swap paired ear or ring items in one equip pass when the
+-- item needs to cross from one side to the other.
+--
+-- Example: current left_ear=Moonshade, right_ear=Thrud; target left_ear=Thrud,
+-- right_ear=Brutal.  GearSwap equips Brutal to right_ear but cannot move Thrud
+-- from right_ear to left_ear in the same pass.  The fix: detect the pattern and
+-- re-send the identical gs equip command ~0.65s later.
+
+local PAIRED_SLOT_PAIRS = {
+    { 'left_ear',  'right_ear'  },
+    { 'left_ring', 'right_ring' },
+}
+
+-- Extract a plain item name from a raw Lua value string captured by the parser.
+-- Handles: "Item Name", 'Item Name', or { name="Item Name", augments={...} }.
+local function slot_name_from_lua_value(val)
+    if not val then return nil end
+    val = val:gsub('^%s+', ''):gsub('%s+$', '')
+    local plain = val:match('^["\'](.+)["\']$')
+    if plain then return plain end
+    local from_table = val:match('[Nn]ame%s*=%s*["\']([^"\']+)["\']')
+    if from_table then return from_table end
+    return nil
+end
+
+local function names_equal(a, b)
+    if not a or not b then return false end
+    a = tostring(a):lower():match('^%s*(.-)%s*$')
+    b = tostring(b):lower():match('^%s*(.-)%s*$')
+    return a == b
+end
+
+-- Inspect equipped paired slots vs target set slots.  If an item would need to
+-- cross from one side of a pair to the other (e.g. right_ear → left_ear),
+-- schedule one delayed re-send of the equip command so FFXI can complete the
+-- move on the second pass.  Logs per-pair state at CHAT.detail level always.
+local function maybe_schedule_paired_retry(node, cmd, path)
+    local assignment = node and node.assignment
+    local rhs        = assignment and assignment.rhs
+    if not rhs then return end
+    local target_slots = rhs.slots or {}
+
+    local current, cur_err = snapshot.capture()
+    if not current then
+        gt_chat(CHAT.detail, 'Paired-slot check: could not read current equipment: ' .. tostring(cur_err or '?'))
+        return
+    end
+
+    local risk = false
+
+    for _, pair in ipairs(PAIRED_SLOT_PAIRS) do
+        local sl, sr = pair[1], pair[2]
+        local cur_l = current[sl] and not current[sl].empty and current[sl].name or nil
+        local cur_r = current[sr] and not current[sr].empty and current[sr].name or nil
+        local tgt_l = slot_name_from_lua_value(target_slots[sl])
+        local tgt_r = slot_name_from_lua_value(target_slots[sr])
+
+        gt_chat(CHAT.detail,
+            'Paired-slot [' .. sl .. '/' .. sr .. '] '
+            .. 'cur=' .. (cur_l or 'empty') .. '/' .. (cur_r or 'empty') .. ' '
+            .. 'tgt=' .. (tgt_l or '?') .. '/' .. (tgt_r or '?'))
+
+        -- Cross-move: target wants an item currently in the opposite slot of the pair.
+        local l_needs_cross = tgt_l and cur_r and names_equal(tgt_l, cur_r)
+        local r_needs_cross = tgt_r and cur_l and names_equal(tgt_r, cur_l)
+
+        if l_needs_cross or r_needs_cross then
+            local why = {}
+            if l_needs_cross then why[#why+1] = tgt_l .. ' (' .. sr .. ' → ' .. sl .. ')' end
+            if r_needs_cross then why[#why+1] = tgt_r .. ' (' .. sl .. ' → ' .. sr .. ')' end
+            gt_chat(CHAT.detail, 'Paired-slot retry scheduled: ' .. table.concat(why, ', '))
+            risk = true
+        end
+    end
+
+    if not risk then return end
+
+    coroutine.schedule(function()
+        if active_edit_path ~= path then
+            gt_chat(CHAT.detail, 'Paired-slot retry skipped: path changed to ' .. tostring(active_edit_path))
+            return
+        end
+        gt_chat(CHAT.detail, 'Paired-slot retry: ' .. cmd)
+        windower.send_command(cmd)
+    end, 0.65)
 end
 
 local function equip_node(node, cmd)
@@ -1000,6 +1163,8 @@ local function equip_node(node, cmd)
     end
     last_auto_equip_path = path
     gt_chat(CHAT.detail, 'Equip command: ' .. cmd)
+    -- Capture current state BEFORE sending so the pre-equip snapshot is accurate.
+    maybe_schedule_paired_retry(node, cmd, path)
     windower.send_command(cmd)
     capture_baseline_for(node)
 end
@@ -1233,6 +1398,265 @@ local function handle_edit_command(arg)
         set_edit_mode(false)
     else
         gt_chat(CHAT.warn, 'Usage: //gt edit [on|off|toggle]')
+    end
+end
+
+local function set_shift_arrow_nav(value)
+    -- Unbind with the old prefix, update state, rebind with the new prefix.
+    local was_bound = nav_keys_bound
+    if was_bound then unbind_nav_keys() end
+    shift_arrow_nav = value and true or false
+    settings.shift_arrow_nav = shift_arrow_nav
+    settings:save()
+    if was_bound then bind_nav_keys() end
+    if shift_arrow_nav then
+        gt_chat(CHAT.info, 'Shift-arrow navigation enabled. Plain arrows pass through to FFXI.')
+    else
+        gt_chat(CHAT.info, 'Shift-arrow navigation disabled. Plain arrows control GearTree.')
+    end
+end
+
+local function handle_shift_command(arg)
+    arg = tostring(arg or 'status'):lower()
+    if arg == 'on' or arg == 'true' or arg == '1' then
+        set_shift_arrow_nav(true)
+    elseif arg == 'off' or arg == 'false' or arg == '0' then
+        set_shift_arrow_nav(false)
+    elseif arg == 'status' or arg == '' then
+        gt_chat(CHAT.info, 'Shift-arrow navigation: ' .. (shift_arrow_nav and 'on' or 'off') .. '.')
+    else
+        gt_chat(CHAT.warn, 'Usage: //gt shift [on|off|status]')
+    end
+end
+
+local function handle_mouse_mode_command(arg)
+    arg = tostring(arg or 'status'):lower()
+    -- Backward compat: map old mode names to current 'on'/'off'.
+    if arg == 'normal' or arg == 'left' then arg = 'on' end
+    if arg == 'shift' or arg == 'right' then arg = 'off' end
+    if arg == 'on' then
+        settings.mouse_mode = 'on'
+        settings:save()
+        ui.set_mouse_mode('on')
+        gt_chat(CHAT.info, 'Mouse activation: on. Left click controls GearTree.')
+    elseif arg == 'off' then
+        settings.mouse_mode = 'off'
+        settings:save()
+        ui.set_mouse_mode('off')
+        gt_chat(CHAT.info, 'Mouse activation: off. Hover only; use keyboard controls to interact.')
+    elseif arg == 'status' or arg == '' then
+        -- ui.get_mouse_mode() reads the live cfg value, not just the saved setting.
+        local live = ui.get_mouse_mode and ui.get_mouse_mode() or tostring(settings.mouse_mode or 'on')
+        if live == 'off' then
+            gt_chat(CHAT.info, 'Mouse activation: off. Hover only; use keyboard controls to interact.')
+        else
+            gt_chat(CHAT.info, 'Mouse activation: on. Left click controls GearTree.')
+        end
+    else
+        gt_chat(CHAT.warn, 'Usage: //gt mouse [on|off|status]')
+    end
+end
+
+local function handle_cursor_command(arg)
+    arg = tostring(arg or 'status'):lower()
+    if arg == 'on' then
+        settings.cursor_overlay = true
+        settings:save()
+        if ui.set_cursor_overlay then ui.set_cursor_overlay(true) end
+        gt_chat(CHAT.info, 'Cursor overlay: on. A crosshair follows the mouse inside GearTree.')
+    elseif arg == 'off' then
+        settings.cursor_overlay = false
+        settings:save()
+        if ui.set_cursor_overlay then ui.set_cursor_overlay(false) end
+        gt_chat(CHAT.info, 'Cursor overlay: off.')
+    elseif arg == 'status' or arg == '' then
+        local live = ui.get_cursor_overlay and ui.get_cursor_overlay() or (settings.cursor_overlay == true)
+        gt_chat(CHAT.info, 'Cursor overlay: ' .. (live and 'on' or 'off') .. '.')
+    else
+        gt_chat(CHAT.warn, 'Usage: //gt cursor [on|off|status]')
+    end
+end
+
+-- Print the actual computed frame/background/zone bounds (read-only diagnostic).
+local function handle_bginfo_command()
+    local lines = ui.bounds_lines and ui.bounds_lines() or {}
+    gt_chat(CHAT.info, 'Background / layout bounds:')
+    for _, line in ipairs(lines) do
+        if windower and windower.add_to_chat then
+            windower.add_to_chat(CHAT.detail, line)
+        else
+            log(line)
+        end
+    end
+end
+
+local function handle_scale_command(arg)
+    arg = tostring(arg or ''):lower():gsub('^%s+', ''):gsub('%s+$', '')
+    if arg == '' then
+        local s = ui.get_scale and ui.get_scale() or (settings.ui_scale or 1.0)
+        gt_chat(CHAT.info, string.format('UI scale: %.2f  (range 0.75-2.0, default 1.0)', s))
+        return
+    elseif arg == 'reset' then
+        settings.ui_scale = 1.0
+        settings:save()
+        if ui.set_scale then ui.set_scale(1.0) end
+        gt_chat(CHAT.info, 'UI scale reset to 1.0.')
+        return
+    end
+    local s = tonumber(arg)
+    if not s then
+        gt_chat(CHAT.warn, 'Usage: //gt scale [0.75-2.0 | reset]  e.g. //gt scale 1.25')
+        return
+    end
+    s = math.max(0.75, math.min(s, 2.0))
+    settings.ui_scale = s
+    settings:save()
+    if ui.set_scale then ui.set_scale(s) end
+    gt_chat(CHAT.info, string.format('UI scale set to %.2f', s))
+end
+
+local function handle_opacity_command(arg)
+    arg = tostring(arg or ''):lower():gsub('^%s+', ''):gsub('%s+$', '')
+    if arg == '' then
+        local cur = ui.get_opacity and ui.get_opacity() or (settings.opacity or 100)
+        gt_chat(CHAT.info, string.format('UI opacity: %d%%  (range 35-100, default 100)', cur))
+        return
+    elseif arg == 'reset' then
+        settings.opacity = 100
+        settings:save()
+        if ui.set_opacity then ui.set_opacity(100) end
+        gt_chat(CHAT.info, 'UI opacity reset to 100%.')
+        return
+    end
+    local pct = tonumber(arg)
+    if not pct then
+        gt_chat(CHAT.warn, 'Usage: //gt opacity | //gt opacity <35-100> | //gt opacity reset')
+        return
+    end
+    pct = math.max(35, math.min(100, math.floor(pct)))
+    settings.opacity = pct
+    settings:save()
+    if ui.set_opacity then ui.set_opacity(pct) end
+    gt_chat(CHAT.info, string.format('UI opacity set to %d%%.', pct))
+end
+
+-- Layout calibration tool (distinct from the folder //gt layout command).
+local function handle_calib_command(arg)
+    arg = tostring(arg or ''):lower()
+    if arg == 'on' then
+        if ui.set_layout_mode then ui.set_layout_mode(true) end
+        gt_chat(CHAT.info, 'Layout calibration: on. Drag the guide boxes to align sections; drag a box bottom edge to resize. //gt calib save to persist.')
+    elseif arg == 'off' then
+        if ui.set_layout_mode then ui.set_layout_mode(false) end
+        gt_chat(CHAT.info, 'Layout calibration: off.')
+    elseif arg == 'save' then
+        if settings.layout_calibration_enabled ~= true then
+            gt_chat(CHAT.warn, 'Layout calibration persistence is disabled during UI cleanup. Use //gt calib print to inspect values.')
+        else
+            if ui.get_layout then settings.layout = ui.get_layout() end
+            settings:save()
+            gt_chat(CHAT.info, 'Layout calibration saved to settings.')
+        end
+    elseif arg == 'reset' then
+        local def = ui.reset_layout and ui.reset_layout() or nil
+        if settings.layout_calibration_enabled ~= true then
+            gt_chat(CHAT.info, 'Layout calibration reset to live defaults. (Persistence disabled — settings.xml not written.)')
+        else
+            if def then settings.layout = def end
+            settings:save()
+            gt_chat(CHAT.info, 'Layout calibration reset to defaults (saved).')
+        end
+    elseif arg == 'print' then
+        local lines = ui.layout_lines and ui.layout_lines() or {}
+        gt_chat(CHAT.info, 'Current layout metrics (copyable):')
+        -- Use a colored addon line (no prefix) so the table stays copyable and
+        -- does not look like white /say chat.
+        for _, line in ipairs(lines) do
+            if windower and windower.add_to_chat then
+                windower.add_to_chat(CHAT.detail, line)
+            else
+                log(line)
+            end
+        end
+    elseif arg == 'bounds' or arg == 'bginfo' then
+        handle_bginfo_command()
+    else
+        gt_chat(CHAT.warn, 'Usage: //gt calib on|off|save|reset|print|bounds')
+    end
+end
+
+-- ── Theme switching ──────────────────────────────────────────────────────────
+
+local function apply_theme_by_name(name, recreate)
+    if not ui.set_theme_name then return false end
+    if not ui.set_theme_name(name) then
+        gt_chat(CHAT.warn, 'Theme "' .. name .. '" not found. Check themes/' .. name .. '/panel_fill.png exists.')
+        return false
+    end
+    if recreate then
+        local was_visible = ui.is_visible and ui.is_visible()
+        ui.destroy()
+        ui.create(current_root, save_pos)
+        if settings.layout_calibration_enabled == true and ui.set_layout then
+            ui.set_layout(settings.layout)
+        end
+        ui.set_equip_callback(equip_node)
+        if ui.set_selection_callback then ui.set_selection_callback(handle_selection_changed) end
+        if was_visible then ui.show() end
+    end
+    return true
+end
+
+local function handle_theme_command(sub, name)
+    sub  = tostring(sub  or ''):lower()
+    name = tostring(name or ''):lower()
+
+    if sub == '' then
+        local cur = ui.get_theme_name and ui.get_theme_name() or settings.theme
+        gt_chat(CHAT.info, 'Current theme: ' .. cur .. '.  //gt theme list | //gt theme <name> | //gt theme next')
+
+    elseif sub == 'list' then
+        local themes = ui.list_themes and ui.list_themes() or {}
+        if #themes == 0 then
+            gt_chat(CHAT.warn, 'No theme folders found under themes/.')
+        else
+            local cur = ui.get_theme_name and ui.get_theme_name() or settings.theme
+            gt_chat(CHAT.info, 'Available themes:')
+            for _, t in ipairs(themes) do
+                local marker = (t == cur) and ' *' or ''
+                windower.add_to_chat(CHAT.detail, '  ' .. t .. marker)
+            end
+        end
+
+    elseif sub == 'next' then
+        local themes = ui.list_themes and ui.list_themes() or {}
+        if #themes == 0 then gt_chat(CHAT.warn, 'No themes found.'); return end
+        local cur = settings.theme
+        local idx = 1
+        for i, t in ipairs(themes) do if t == cur then idx = i; break end end
+        local next_theme = themes[(idx % #themes) + 1]
+        if apply_theme_by_name(next_theme, true) then
+            settings.theme = next_theme
+            settings:save()
+            gt_chat(CHAT.info, 'Theme: ' .. next_theme)
+        end
+
+    elseif sub == 'reload' then
+        local cur = settings.theme
+        if apply_theme_by_name(cur, true) then
+            gt_chat(CHAT.info, 'Theme "' .. cur .. '" reloaded.')
+        end
+
+    elseif sub ~= '' then
+        -- Treat sub as the theme name (//gt theme <name>).
+        if apply_theme_by_name(sub, true) then
+            settings.theme = sub
+            settings:save()
+            gt_chat(CHAT.info, 'Theme set to "' .. sub .. '".')
+        end
+
+    else
+        gt_chat(CHAT.warn, 'Usage: //gt theme [list | <name> | next | reload]')
     end
 end
 
@@ -1581,7 +2005,22 @@ local function handle_augdebug_command()
         gt_chat(CHAT.detail, line)
     end
 end
+local function handle_why_command()
+    if not ensure_ui() then return end
 
+    local node = ui.get_selected_node and ui.get_selected_node() or nil
+    local lines, err = category_debug.explain_node(node)
+
+    if not lines then
+        gt_chat(CHAT.warn, err or 'No category explanation is available for the highlighted item.')
+        return
+    end
+
+    gt_chat(CHAT.info, 'Category explanation')
+    for _, line in ipairs(lines) do
+        gt_chat(CHAT.detail, line)
+    end
+end
 local function handle_debugslot_command(args)
     local slot = table.concat(args or {}, ' '):gsub('^%s+', ''):gsub('%s+$', '')
     if slot == '' then
@@ -1940,8 +2379,16 @@ windower.register_event('mouse', function(type, x, y, delta, blocked)
         return ui.on_left_click(x, y)
     elseif type == 2 then
         return ui.on_left_up(x, y)
-    elseif type == 3 or type == 4 then
+    elseif type == 3 then
+        -- Right button down: activate in right mode, preview-cursor in left mode.
         return ui.on_right_click(x, y)
+    elseif type == 4 then
+        -- Right button up: no action. Right click never starts a drag, so there
+        -- is no up-event cleanup needed (unlike LMB which uses on_left_up).
+        return false
+    elseif type == 5 or type == 6 then
+        -- Middle mouse button: do not handle. Pass through to FFXI/Windower.
+        return false
     elseif type == 7 or type == 10 then
         -- Scroll wheel: move cursor
         return ui.on_scroll(x, y, delta)
@@ -1955,17 +2402,19 @@ end)
 
 windower.register_event('keyboard', function(dik, down)
     if SHIFT_KEYS[dik] then
-        if not down then
+        if down then
+            shift_toggle_down = true
+        else
             clear_shift_toggle()
-            return false
+            if shift_arrow_nav then clear_nav_repeat() end
         end
-
         return false
     end
 
     local action = NAV_REPEAT_KEYS[dik]
     if not action then return false end
 
+    -- Both modes: binds handle the initial press; keyboard event drives repeat.
     if not nav_keys_bound then
         clear_nav_repeat()
         return false
@@ -2070,6 +2519,22 @@ windower.register_event('addon command', function(cmd, ...)
         set_tree_mode(args[1])
     elseif cmd == 'edit' then
         handle_edit_command(args[1])
+    elseif cmd == 'shift' then
+        handle_shift_command(args[1])
+    elseif cmd == 'mouse' then
+        handle_mouse_mode_command(args[1])
+    elseif cmd == 'cursor' then
+        handle_cursor_command(args[1])
+    elseif cmd == 'scale' then
+        handle_scale_command(args[1])
+    elseif cmd == 'opacity' then
+        handle_opacity_command(args[1])
+    elseif cmd == 'theme' or cmd == 'themes' then
+        handle_theme_command(args[1], args[2])
+    elseif cmd == 'calib' then
+        handle_calib_command(args[1])
+    elseif cmd == 'bginfo' or cmd == 'bounds' then
+        handle_bginfo_command()
     elseif cmd == 'raw' then
         set_tree_mode('raw')
     elseif cmd == 'organized' or cmd == 'organised' then
@@ -2114,10 +2579,35 @@ windower.register_event('addon command', function(cmd, ...)
         if ui.cursor_left then ui.cursor_left() else ui.cursor_back() end
     elseif cmd == 'status' then
         show_status()
+    elseif cmd == 'snap' then
+        -- Force an immediate live snapshot refresh of the Gear tab display.
+        local shot, err = snapshot.capture()
+        if shot and active_edit_path then
+            publish_current_equipment(active_edit_path, shot)
+            refresh_inventory_locations(false)
+            gt_chat(CHAT.info, 'Gear tab refreshed.')
+        elseif shot then
+            gt_chat(CHAT.warn, 'No active edit set — select a set first.')
+        else
+            gt_chat(CHAT.error, 'Snapshot failed: ' .. (err or 'unknown'))
+        end
     elseif cmd == 'augdebug' or cmd == 'debugaug' then
         handle_augdebug_command()
+    elseif cmd == 'why' or cmd == 'debugcat' then
+        handle_why_command()
     elseif cmd == 'debugslot' then
         handle_debugslot_command(args)
+    elseif cmd == 'debugstatus' then
+        if not ensure_ui() then return end
+        local lines, err
+        if ui.debug_status_trace then
+            lines, err = ui.debug_status_trace()
+        end
+        if not lines then
+            gt_chat(CHAT.warn, err or 'Select a gear set first.')
+        else
+            for _, line in ipairs(lines) do gt_chat(CHAT.detail, line) end
+        end
     elseif cmd == 'make' then
         handle_make_command(args)
     elseif cmd == 'move' then
@@ -2131,34 +2621,59 @@ windower.register_event('addon command', function(cmd, ...)
     elseif cmd == 'layout' then
         handle_layout_command(args)
     elseif cmd == 'help' or cmd == '?' then
-        log('GearTree commands:')
+        log('GearTree  (//gt devhelp for dev/debug commands)')
+        log('-- Basic --')
         log('  //gt show | hide | toggle')
-        log('  //gt reload          - re-parse the current file')
-        log('  //gt save            - save changed equipped slots into highlighted set')
-        log('  //gt saveslot <slot> - force-save the equipped item in one slot')
-        log('  //gt undo            - restore the backup from the last GearTree save')
-        log('  //gt last            - jump back to the last saved set')
-        log('  //gt open            - open highlighted set source near its Lua line')
-        log('  //gt augdebug        - print item ID, augments, and raw extdata for the selected gear row')
-        log('  //gt debugslot <slot> - print expected/equipped/storage details for one slot')
-        log('  //gt find <text>     - jump to a matching set, folder, or gear line')
-        log('  //gt status          - show loaded file, mode, selection, changes, unresolved refs')
-        log('  //gt edit [on|off|toggle] - auto-equip highlighted sets and track live changes')
-        log('  //gt load <path>     - parse a specific gear file')
-        log('  //gt auto            - auto-detect gear file for current job')
-        log('  //gt mode [raw|organized|toggle] - switch tree display mode')
-        log('  //gt make <folder> [root] - add a virtual display folder')
-        log('  //gt move <set> to <folder> - move a Lua set/folder in the display only')
-        log('  //gt move [set] up|down|top|bottom - reorder display items')
-        log('  //gt move here       - move the last saved set into highlighted virtual folder')
-        log('  //gt rename <new> | //gt rename <folder> to <new>')
-        log('  //gt remove [folder] | //gt unmove [set] | //gt layout reset')
+        log('  //gt reload               - re-parse the current gear file')
+        log('  //gt help')
+        log('-- Navigation --')
+        log('  Keyboard: Up/Down move, Right expand, Left back, End equip, Esc close')
+        log('  Left-click a row to expand/equip. Drag the title bar to move the window.')
+        log('  (//gt shift on to use Shift+Arrow instead of plain Arrow keys.)')
+        log('  //gt find <text>          - jump to a matching set or folder')
         log('  //gt expandall | collapseall')
-        log('  //gt pos [x y]       - show or set window position')
-        log('Keyboard while visible: Up/Down navigate tree or scroll active tab, Right expand/tab, Left back/tab, End equip, Esc close.')
-        log('Left-click a row to expand and/or equip.')
-        log('Right-click a row to preview set info, source, and gear.')
-        log('Drag the title bar to move the window.')
+        log('  //gt last                 - jump back to the last saved set')
+        log('-- Saving --')
+        log('  //gt save                 - save changed equipped slots into highlighted set')
+        log('  //gt saveslot <slot>      - force-save the equipped item in one slot')
+        log('  //gt undo                 - restore the backup from the last GearTree save')
+        log('-- Notes --')
+        log('  //gt note <text>          - save a note on the highlighted set or folder')
+        log('  //gt note                 - show the saved note for the highlighted set or folder')
+        log('  //gt note clear           - clear the note for the highlighted set or folder')
+        log('-- Views --')
+        log('  //gt mode [raw|organized|toggle]  - switch tree display mode')
+        log('-- Layout --')
+        log('  //gt make <folder> [root] - add a virtual display folder')
+        log('  //gt move <set> to <folder>')
+        log('  //gt move [set] up|down|top|bottom')
+        log('  //gt move here            - move the last saved set into the highlighted folder')
+        log('  //gt rename <new>  |  //gt rename <folder> to <new>')
+        log('  //gt remove [folder]  |  //gt unmove [set]  |  //gt layout reset')
+        log('-- Settings --')
+        log('  //gt shift [on|off|status]  - Shift+Arrow navigation (frees plain arrows for FFXI)')
+        log('  //gt mouse [on|off|status]  - left-click activation (on by default)')
+        log('  //gt cursor [on|off|status] - show mouse pointer inside GearTree (on by default)')
+        log('  //gt scale [0.75-2.0|reset] - zoom level (default 1.0)')
+        log('  //gt opacity [35-100|reset] - window transparency (100 = fully opaque)')
+        log('  //gt pos [x y]              - show or set window position')
+        log('Developer/debug commands: //gt devhelp')
+    elseif cmd == 'devhelp' then
+        log('GearTree dev/debug commands:')
+        log('  //gt snap                  - force-refresh Gear tab from live equipment')
+        log('  //gt augdebug | debugaug   - print augments and raw extdata for the selected gear row')
+        log('  //gt debugslot <slot>      - print expected/equipped/storage details for one slot')
+        log('  //gt debugstatus           - print slot/item/equipped/status trace for the selected set')
+        log('  //gt why | debugcat        - explain why the selected set/folder is categorized as it is')
+        log('  //gt calib [on|off|save|reset|print|bounds]  - drag-align UI sections')
+        log('  //gt bginfo | bounds       - print frame/background/zone bounds')
+        log('  //gt theme [list|<name>|next|reload]  - switch visual skin')
+        log('  //gt status                - show loaded file, mode, selection, and live changes')
+        log('  //gt edit [on|off|toggle]  - auto-equip highlighted sets and track live changes')
+        log('  //gt open                  - open the highlighted set source near its Lua line')
+        log('  //gt load <path>           - parse a specific gear file')
+        log('  //gt auto                  - auto-detect gear file for the current job')
+        log('Player commands: //gt help')
     else
         log('Unknown command: ' .. cmd .. '. Try //gt help')
     end
@@ -2178,8 +2693,18 @@ windower.register_event('load', function()
         pos_y = settings.pos_y,
         width = settings.width,
         visible_rows = settings.visible_rows,
+        ui_scale = settings.ui_scale,
+        mouse_mode = settings.mouse_mode,
+        cursor_overlay = settings.cursor_overlay,
+        ui_opacity = settings.opacity or 100,
     })
+    -- Load the persisted theme before creating UI objects.
+    apply_theme_by_name(settings.theme or 'jeuno', false)
     ui.create(current_root, save_pos)
+    -- Apply persisted layout calibration only when explicitly enabled.
+    if settings.layout_calibration_enabled == true and ui.set_layout then
+        ui.set_layout(settings.layout)
+    end
     ui.set_equip_callback(equip_node)
     if ui.set_selection_callback then
         ui.set_selection_callback(handle_selection_changed)
